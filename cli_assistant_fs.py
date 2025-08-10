@@ -2,24 +2,17 @@
 """
 cli_assistant_fs.py — lokalny most: ja ↔ Twój filesystem (macOS/Linux)
 
-Minimalny klient CLI, który pozwala modelowi (np. gpt-5) czytać i edytować pliki
-u Ciebie lokalnie przez function calling. Działa w pętli: wpisujesz polecenie,
-model odpowiada i w razie potrzeby wywołuje narzędzia (list_dir, read_file, write_file).
+Teraz z trybem DEBUG, żeby było wiadomo, co się wyprawia:
+- loguje skróty wiadomości, narzędzia, przycinanie historii, backoff na 429,
+- pokazuje które ograniczenie tokenów użył (max_completion_tokens vs max_tokens),
+- zlicza rozmiary danych przekazywanych do modelu i narzędzi (orientacyjnie).
 
-Bezpieczeństwo:
-- Operujemy domyślnie w katalogu roboczym (WORKDIR). Nie wyjdziemy poza ten katalog.
-- Każdy zapis robi kopię *.bak z timestampem.
-- Brak wykonywania komend systemowych (domyślnie).
-
-Szybki start (w katalogu projektu):
+Szybki start:
     python3 -m venv venv
     source venv/bin/activate
-    export OPENAI_API_KEY="twoj_klucz_api_openai"
-    export WORKDIR="$PWD"
-    export OPENAI_MODEL="gpt-5"
-    pip install --upgrade pip
-    pip install openai rich
-    python3 cli_assistant_fs.py
+    pip install --upgrade pip && pip install -r requirements.txt
+    cp .env.example .env && $EDITOR .env
+    ./run.sh
 """
 
 import os
@@ -49,27 +42,56 @@ console = Console()
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5")
 WORKDIR = pathlib.Path(os.environ.get("WORKDIR", os.getcwd())).resolve()
 
-# Ścieżka do kontekstu (JSON) — utrzymuje notatki i wytyczne dla sesji CLI
+# Ścieżka do kontekstu (JSON)
 CONTEXT_PATH = os.environ.get("CLIFS_CONTEXT")
 if not CONTEXT_PATH:
     CONTEXT_PATH = str(WORKDIR / "clifs.context.json")
 CONTEXT_PATH = str(pathlib.Path(CONTEXT_PATH).resolve())
 
-# Stream on/off (domyślnie włączone; wyłącz: export STREAM_PARTIAL=0)
+# Debug
+DEBUG = os.environ.get("DEBUG", "0") == "1"
+DEBUG_FORMAT = os.environ.get("DEBUG_FORMAT", "text")  # text|json
+DEBUG_REDACT = os.environ.get("DEBUG_REDACT", "0") == "1"  # ukrywaj treści, pokazuj długości
+
+def _dbg(event: str, **fields):
+    if not DEBUG:
+        return
+    # delikatna redakcja treści
+    def _preview(v):
+        if DEBUG_REDACT:
+            return f"<len={len(str(v))}>"
+        if isinstance(v, str):
+            t = v.replace("\n", "\\n")
+            return t[:160] + ("…" if len(t) > 160 else "")
+        try:
+            s = json.dumps(v, ensure_ascii=False)
+            s = s.replace("\n", "\\n")
+            return s[:160] + ("…" if len(s) > 160 else "")
+        except Exception:
+            return str(v)[:160]
+    if DEBUG_FORMAT == "json":
+        out = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event}
+        out.update({k: _preview(v) for k, v in fields.items()})
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        parts = [f"[{event}]"] + [f"{k}={_preview(v)}" for k, v in fields.items()]
+        print(" ".join(parts))
+
+# Stream on/off i review-pass
 USE_STREAM = os.environ.get("STREAM_PARTIAL", "1") == "1"
-# Drugi przebieg: auto-korekta/recenzja i ewentualne zapisy plików (bez gadania)
 REVIEW_PASS = os.environ.get("REVIEW_PASS", "1") == "1"
 
-# Limity i budżety (zmniejsz szum)
+# Limity
 DEFAULT_MAX_BYTES = int(os.environ.get("MAX_BYTES_PER_READ", "60000"))  # ~60 kB
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1024"))
 MAX_HISTORY_MSGS = int(os.environ.get("MAX_HISTORY_MSGS", "24"))  # system + ostatnie ~24 wpisy
 
-# Twarde bezpieczniki dla komend (wyłączone domyślnie)
-ALLOW_SHELL = os.environ.get("ALLOW_SHELL", "0") == "1"  # włącz uruchamianie komend
+# Shell (domyślnie off)
+ALLOW_SHELL = os.environ.get("ALLOW_SHELL", "0") == "1"
 DEFAULT_CMD_TIMEOUT = int(os.environ.get("CMD_TIMEOUT", "30"))
 GIT_AUTOSNAPSHOT = os.environ.get("GIT_AUTOSNAPSHOT", "0") == "1"
-# Wzorce ignorowane przy chodzeniu po drzewie (po przecinku)
+
+# Ignores
 IGNORE_GLOBS = [s.strip() for s in os.environ.get("IGNORE_GLOBS", ".git,node_modules,dist,build,__pycache__,.venv,venv").split(",") if s.strip()]
 
 client = OpenAI()
@@ -114,6 +136,7 @@ def read_file(path: str, max_bytes: int = None) -> Dict[str, Any]:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         text = data.decode("utf-8", errors="replace")
+    _dbg("read_file", path=str(p), bytes=len(text), clipped=clipped)
     return {"path": str(p), "content": text, "bytes": len(data), "clipped": clipped}
 
 def write_file(path: str, content: str, create_dirs: bool = True) -> Dict[str, Any]:
@@ -129,15 +152,14 @@ def write_file(path: str, content: str, create_dirs: bool = True) -> Dict[str, A
     else:
         backup_str = ""
     p.write_text(content, encoding="utf-8")
+    _dbg("write_file", path=str(p), backup=bool(backup_str), bytes=len(content))
     return {"path": str(p), "backup": backup_str, "written": len(content)}
 
 def apply_unified_diff(path: str, unified_diff: str) -> Dict[str, Any]:
-    # Świadomie ograniczone: zachęcam do pełnego zapisu pliku write_file.
     if not ("\n--- " in unified_diff and "\n+++ " in unified_diff):
         return {"error": "Nieprawidłowy/nieobsługiwany format unified diff."}
     return {"error": "apply_unified_diff jest ograniczone. Wyślij pełny docelowy plik przez write_file."}
 
-# Czytaj plik w kawałkach, żeby nie wpaść w TPM
 def read_file_range(path: str, start: int = 0, size: int = None) -> Dict[str, Any]:
     p = within_workdir(pathlib.Path(path))
     if not p.exists():
@@ -153,10 +175,8 @@ def read_file_range(path: str, start: int = 0, size: int = None) -> Dict[str, An
             text = chunk.decode("utf-8", errors="replace")
         file_size = p.stat().st_size
         next_start = min(file_size, start + len(chunk))
-        return {
-            "path": str(p), "start": start, "size": len(chunk),
-            "next_start": next_start, "file_size": file_size, "content": text
-        }
+        _dbg("read_file_range", path=str(p), start=start, size=len(chunk), next_start=next_start, file_size=file_size)
+        return {"path": str(p), "start": start, "size": len(chunk), "next_start": next_start, "file_size": file_size, "content": text}
     except Exception as e:
         return {"error": str(e)}
 
@@ -188,6 +208,7 @@ def list_tree(root: str = ".", max_depth: int = 3, include_files: bool = True) -
         if include_files:
             entry["files"] = [f for f in filenames if not _should_ignore(p / f)]
         out.append(entry)
+    _dbg("list_tree", root=str(base), entries=len(out))
     return {"root": str(base), "max_depth": max_depth, "entries": out}
 
 def search_text(pattern: str, path: str = ".", regex: bool = False, max_results: int = 200) -> Dict[str, Any]:
@@ -210,7 +231,9 @@ def search_text(pattern: str, path: str = ".", regex: bool = False, max_results:
                 if (compiled.search(line) if regex else (pattern in line)):
                     results.append({"file": str(fp.relative_to(base)), "line": i, "text": line.strip()})
                     if len(results) >= max_results:
+                        _dbg("search_text", pattern=pattern, truncated=True, count=len(results))
                         return {"root": str(base), "pattern": pattern, "regex": bool(regex), "results": results, "truncated": True}
+    _dbg("search_text", pattern=pattern, truncated=False, count=len(results))
     return {"root": str(base), "pattern": pattern, "regex": bool(regex), "results": results, "truncated": False}
 
 def replace_text(path: str, find: str, replace: str, regex: bool = False, dry_run: bool = True) -> Dict[str, Any]:
@@ -225,14 +248,16 @@ def replace_text(path: str, find: str, replace: str, regex: bool = False, dry_ru
         count = text.count(find)
         new_text = text.replace(find, replace)
     if dry_run:
+        _dbg("replace_text_dry", path=str(p), occurrences=count)
         return {"path": str(p), "would_change": count}
     if count > 0:
-        # backup i zapis
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         backup = p.with_suffix(p.suffix + f".{ts}.bak")
         shutil.copy2(p, backup)
         p.write_text(new_text, encoding="utf-8")
+        _dbg("replace_text_write", path=str(p), replacements=count, backup=str(backup))
         return {"path": str(p), "replacements": count, "backup": str(backup)}
+    _dbg("replace_text_noop", path=str(p))
     return {"path": str(p), "replacements": 0}
 
 def write_files_batch(files: List[Dict[str, str]], create_dirs: bool = True) -> Dict[str, Any]:
@@ -240,6 +265,7 @@ def write_files_batch(files: List[Dict[str, str]], create_dirs: bool = True) -> 
     for f in files:
         res = write_file(f["path"], f["content"], create_dirs=create_dirs)
         written.append(res)
+    _dbg("write_files_batch", count=len(written))
     return {"written": written}
 
 UNSAFE_TOKENS = {
@@ -269,14 +295,16 @@ def run_command(command: str, confirm: bool = False, timeout: int = None, cwd: s
             text=True,
             timeout=t,
         )
+        _dbg("run_command", cwd=str(base), returncode=proc.returncode, stdout=len(proc.stdout), stderr=len(proc.stderr))
         return {
             "cwd": str(base),
             "command": command,
             "returncode": proc.returncode,
-            "stdout": proc.stdout[-100000:],  # przycinamy
+            "stdout": proc.stdout[-100000:],
             "stderr": proc.stderr[-100000:],
         }
     except subprocess.TimeoutExpired:
+        _dbg("run_command_timeout", command=command, timeout=t)
         return {"error": f"Przekroczono timeout {t}s", "command": command}
     except FileNotFoundError:
         return {"error": "Polecenie nie znalezione (sprawdź PATH).", "command": command}
@@ -284,253 +312,43 @@ def run_command(command: str, confirm: bool = False, timeout: int = None, cwd: s
         return {"error": str(e), "command": command}
 
 def git_snapshot(message: str = "snapshot: auto commit") -> Dict[str, Any]:
-    """Jeśli repo istnieje, dodaj wszystkie zmiany i zrób commit."""
     repo = WORKDIR / ".git"
     if not repo.exists():
         return {"error": "To nie jest repozytorium git."}
     if not ALLOW_SHELL:
         return {"error": "Wymaga ALLOW_SHELL=1 (używa git)."}
     try:
-        # git add -A
         a = run_command("git add -A", confirm=True, cwd=str(WORKDIR))
         if a.get("error"):
             return a
-        # commit
         c = run_command(f"git commit -m {json.dumps(message)}", confirm=True, cwd=str(WORKDIR))
+        _dbg("git_snapshot", message=message, rc=c.get("returncode"))
         return {"add": a, "commit": c}
     except Exception as e:
         return {"error": str(e)}
 
-# Spec narzędzi (function calling)
+# Spec narzędzi
 TOOLS_SPEC = [
-    {
-        "type": "function",
-        "function": {
-            "name": "list_dir",
-            "description": "Listuj pliki i foldery w katalogu roboczym lub podkatalogu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Ścieżka, domyślnie '.'"}
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Czytaj plik tekstowy (UTF-8) i zwróć jego zawartość.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "max_bytes": {"type": "integer", "minimum": 1024}
-                },
-                "required": ["path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file_range",
-            "description": "Czytaj plik w kawałku: start + size (domyślnie ~60kB).",
-            "parameters": {
-                "type":"object",
-                "properties": {
-                    "path":{"type":"string"},
-                    "start":{"type":"integer"},
-                    "size":{"type":"integer"}
-                },
-                "required":["path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_file",
-            "description": "Zapisz cały plik (UTF-8). Tworzy backup jeśli plik istniał.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "content": {"type": "string"},
-                    "create_dirs": {"type": "boolean"}
-                },
-                "required": ["path", "content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_tree",
-            "description": "Zwróć strukturę katalogów (drzewo) z limitem głębokości i filtrami.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "root": {"type": "string", "description": "Punkt startowy, domyślnie '.'"},
-                    "max_depth": {"type": "integer", "minimum": 0, "maximum": 20},
-                    "include_files": {"type": "boolean"}
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_text",
-            "description": "Szukaj wzorca w plikach (rekurencyjnie). Użyj regex=true dla regexów.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pattern": {"type": "string"},
-                    "path": {"type": "string"},
-                    "regex": {"type": "boolean"},
-                    "max_results": {"type": "integer", "minimum": 1}
-                },
-                "required": ["pattern"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "replace_text",
-            "description": "Zamień tekst w jednym pliku. Najpierw dry_run=true aby zobaczyć ile zmian.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "find": {"type": "string"},
-                    "replace": {"type": "string"},
-                    "regex": {"type": "boolean"},
-                    "dry_run": {"type": "boolean"}
-                },
-                "required": ["path", "find", "replace"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_files_batch",
-            "description": "Zapisz wiele plików naraz (każdy tworzy backup jeśli istniał).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "files": {
-                        "type": "array",
-                        "items": {"type": "object", "required": ["path", "content"], "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}
-                    },
-                    "create_dirs": {"type": "boolean"}
-                },
-                "required": ["files"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "apply_unified_diff",
-            "description": "Spróbuj zastosować unified diff do wskazanego pliku (ograniczone).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "unified_diff": {"type": "string"}
-                },
-                "required": ["path", "unified_diff"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_command",
-            "description": "Uruchom bezpieczną komendę powłoki w WORKDIR (wymaga ALLOW_SHELL=1 i confirm=true).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string"},
-                    "confirm": {"type": "boolean"},
-                    "timeout": {"type": "integer", "minimum": 1},
-                    "cwd": {"type": "string"}
-                },
-                "required": ["command", "confirm"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_snapshot",
-            "description": "Wykonaj `git add -A` i `git commit -m <msg>` jeśli to repo git (wymaga ALLOW_SHELL=1).",
-            "parameters": {
-                "type": "object",
-                "properties": {"message": {"type": "string"}},
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_context",
-            "description": "Odczytaj bieżący plik kontekstu i jego ścieżkę.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_context",
-            "description": "Zapisz pełny plik kontekstu (obiekt JSON).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "object"}
-                },
-                "required": ["content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_context",
-            "description": "Częściowa aktualizacja pliku kontekstu (płytkie łączenie).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "delta": {"type": "object"}
-                },
-                "required": ["delta"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_note",
-            "description": "Dopisz notatkę (z timestampem) do pliku kontekstu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "note": {"type": "string"}
-                },
-                "required": ["note"]
-            }
-        }
-    }
+    {"type":"function","function":{"name":"list_dir","description":"Listuj pliki i foldery w katalogu roboczym lub podkatalogu.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Ścieżka, domyślnie '.'"}},"required":[]}}},
+    {"type":"function","function":{"name":"read_file","description":"Czytaj plik tekstowy (UTF-8) i zwróć jego zawartość.","parameters":{"type":"object","properties":{"path":{"type":"string"},"max_bytes":{"type":"integer","minimum":1024}},"required":["path"]}}},
+    {"type":"function","function":{"name":"read_file_range","description":"Czytaj plik w kawałku: start + size (domyślnie ~60kB).","parameters":{"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer"},"size":{"type":"integer"}},"required":["path"]}}},
+    {"type":"function","function":{"name":"write_file","description":"Zapisz cały plik (UTF-8). Tworzy backup jeśli plik istniał.","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"create_dirs":{"type":"boolean"}},"required":["path","content"]}}},
+    {"type":"function","function":{"name":"list_tree","description":"Zwróć strukturę katalogów (drzewo) z limitem głębokości i filtrami.","parameters":{"type":"object","properties":{"root":{"type":"string","description":"Punkt startowy, domyślnie '.'"},"max_depth":{"type":"integer","minimum":0,"maximum":20},"include_files":{"type":"boolean"}},"required":[]}}},
+    {"type":"function","function":{"name":"search_text","description":"Szukaj wzorca w plikach (rekurencyjnie). Użyj regex=true dla regexów.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"regex":{"type":"boolean"},"max_results":{"type":"integer","minimum":1}},"required":["pattern"]}}},
+    {"type":"function","function":{"name":"replace_text","description":"Zamień tekst w jednym pliku. Najpierw dry_run=true aby zobaczyć ile zmian.","parameters":{"type":"object","properties":{"path":{"type":"string"},"find":{"type":"string"},"replace":{"type":"string"},"regex":{"type":"boolean"},"dry_run":{"type":"boolean"}},"required":["path","find","replace"]}}},
+    {"type":"function","function":{"name":"write_files_batch","description":"Zapisz wiele plików naraz (każdy tworzy backup jeśli istniał).","parameters":{"type":"object","properties":{"files":{"type":"array","items":{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}},"create_dirs":{"type":"boolean"}},"required":["files"]}}},
+    {"type":"function","function":{"name":"apply_unified_diff","description":"Spróbuj zastosować unified diff do wskazanego pliku (ograniczone).","parameters":{"type":"object","properties":{"path":{"type":"string"},"unified_diff":{"type":"string"}},"required":["path","unified_diff"]}}},
+    {"type":"function","function":{"name":"run_command","description":"Uruchom bezpieczną komendę powłoki w WORKDIR (wymaga ALLOW_SHELL=1 i confirm=true).","parameters":{"type":"object","properties":{"command":{"type":"string"},"confirm":{"type":"boolean"},"timeout":{"type":"integer","minimum":1},"cwd":{"type":"string"}},"required":["command","confirm"]}}},
+    {"type":"function","function":{"name":"git_snapshot","description":"Wykonaj `git add -A` i `git commit -m <msg>` jeśli to repo git (wymaga ALLOW_SHELL=1).","parameters":{"type":"object","properties":{"message":{"type":"string"}},"required":[]}}},
+    {"type":"function","function":{"name":"read_context","description":"Odczytaj bieżący plik kontekstu i jego ścieżkę.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"write_context","description":"Zapisz pełny plik kontekstu (obiekt JSON).","parameters":{"type":"object","properties":{"content":{"type":"object"}},"required":["content"]}}},
+    {"type":"function","function":{"name":"update_context","description":"Częściowa aktualizacja pliku kontekstu (płytkie łączenie).","parameters":{"type":"object","properties":{"delta":{"type":"object"}},"required":["delta"]}}},
+    {"type":"function","function":{"name":"add_note","description":"Dopisz notatkę (z timestampem) do pliku kontekstu.","parameters":{"type":"object","properties":{"note":{"type":"string"}},"required":["note"]}}},
 ]
 
 def dispatch_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     try:
+        _dbg("tool_call", name=name, args=args)
         if name == "list_dir":
             return list_dir(**args)
         if name == "read_file":
@@ -584,8 +402,8 @@ def _default_context() -> dict:
         },
         "instructions": "Bądź zwięzły, techniczny i po polsku. Preferuj write_file nad diff. Zanim coś zmienisz, wczytaj plik read_file.",
         "notes": [
-            "Środowisko: macOS, zsh, venv, STREAM_PARTIAL=1, REVIEW_PASS=1",
-            "Domyślnie ALLOW_SHELL=0; komendy wyłączone"
+                "Środowisko: macOS, zsh, venv, STREAM_PARTIAL=1, REVIEW_PASS=1",
+                "Domyślnie ALLOW_SHELL=0; komendy wyłączone"
         ],
         "ignore_globs": ".git,node_modules,dist,build,__pycache__,.venv,venv",
         "macros": [
@@ -634,61 +452,32 @@ def build_system_prompt(ctx: dict) -> str:
     notes = ctx.get("notes", [])
     if notes:
         lines.append("[Notatki] " + " | ".join(notes[:6]))
-    return " ".join([l for l in lines if l])
-
-def read_context() -> dict:
-    ctx = ensure_context_file()
-    return {"path": CONTEXT_PATH, "context": ctx}
-
-def write_context(content: dict) -> dict:
-    if not isinstance(content, dict):
-        return {"error": "content musi być obiektem JSON"}
-    save_context(content)
-    return {"path": CONTEXT_PATH, "status": "saved"}
-
-def update_context(delta: dict) -> dict:
-    if not isinstance(delta, dict):
-        return {"error": "delta musi być obiektem JSON"}
-    ctx = ensure_context_file()
-    for k, v in delta.items():
-        if isinstance(v, dict) and isinstance(ctx.get(k), dict):
-            ctx[k].update(v)
-        else:
-            ctx[k] = v
-    save_context(ctx)
-    return {"path": CONTEXT_PATH, "status": "updated", "context": ctx}
-
-def add_note(note: str) -> dict:
-    ctx = ensure_context_file()
-    notes = ctx.setdefault("notes", [])
-    from datetime import datetime as _dt
-    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-    notes.append(f"[{ts}] {note}")
-    save_context(ctx)
-    return {"path": CONTEXT_PATH, "status": "noted", "count": len(notes)}
+    sp = " ".join([l for l in lines if l])
+    _dbg("system_prompt", length=len(sp))
+    return sp
 
 # ───────────────────────── Model helpers ─────────────────────────
 
-def chat_once(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Jedno wywołanie modelu."""
-    return client.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        tools=TOOLS_SPEC,
-        tool_choice="auto",
-        max_completion_tokens=MAX_OUTPUT_TOKENS,
-    )
+def _summarize_messages(msgs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    info = []
+    total_chars = 0
+    for m in msgs:
+        role = m.get("role")
+        content = (m.get("content") or "")
+        total_chars += len(content)
+        info.append(f"{role}:{len(content)}")
+    return {"count": len(msgs), "chars": total_chars, "by_role": ",".join(info[:12]) + ("…" if len(info) > 12 else "")}
 
 def _trim_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    # Zostaw system + ostatnie MAX_HISTORY_MSGS wpisów
     if len(messages) <= MAX_HISTORY_MSGS + 1:
         return messages
     head = [m for m in messages if m.get("role") == "system"][:1]
     tail = [m for m in messages if m.get("role") != "system"][-MAX_HISTORY_MSGS:]
-    return head + tail
+    trimmed = head + tail
+    _dbg("trim_history", before=len(messages), after=len(trimmed))
+    return trimmed
 
 def _with_retry(call, *args, **kwargs):
-    # prosty backoff na 429
     import time
     for i in range(5):
         try:
@@ -696,13 +485,44 @@ def _with_retry(call, *args, **kwargs):
         except Exception as e:
             s = str(e)
             if "rate_limit_exceeded" in s or "TPM" in s or "429" in s:
-                time.sleep(1.5 * (i + 1))
+                delay = 1.5 * (i + 1)
+                _dbg("retry_backoff", attempt=i+1, delay=delay, error=s[:160])
+                time.sleep(delay)
                 continue
             raise
     return call(*args, **kwargs)
 
+def _chat_create_with_limits(messages: List[Dict[str, Any]]):
+    """Próbuje najpierw z max_completion_tokens, jeśli model nie wspiera, fallback do max_tokens."""
+    try:
+        _dbg("chat_create_try", arg="max_completion_tokens", meta=_summarize_messages(messages))
+        return client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=TOOLS_SPEC,
+            tool_choice="auto",
+            max_completion_tokens=MAX_OUTPUT_TOKENS,
+        )
+    except Exception as e1:
+        s1 = str(e1)
+        if "max_completion_tokens" in s1 or "Unsupported parameter" in s1:
+            _dbg("chat_create_fallback", to="max_tokens", error=s1[:160])
+            return client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=TOOLS_SPEC,
+                tool_choice="auto",
+                max_tokens=MAX_OUTPUT_TOKENS,
+            )
+        raise
+
+def chat_once(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    _dbg("chat_once_in", meta=_summarize_messages(messages))
+    resp = _chat_create_with_limits(messages)
+    _dbg("chat_once_out", finish_reason=getattr(resp.choices[0], "finish_reason", "?"))
+    return resp
+
 def to_assistant_message_with_tool_calls(msg) -> Dict[str, Any]:
-    """Zamiana obiektu odpowiedzi SDK na dict assistant z tool_calls dla historii."""
     tool_calls = getattr(msg, "tool_calls", None)
     calls = []
     if tool_calls:
@@ -718,15 +538,13 @@ def to_assistant_message_with_tool_calls(msg) -> Dict[str, Any]:
     out = {"role": "assistant", "content": msg.content or ""}
     if calls:
         out["tool_calls"] = calls
+        _dbg("tool_calls_detected", count=len(calls), names=[c["function"]["name"] for c in calls])
     return out
 
 def stream_final_response(messages):
-    """
-    Streamuj końcową odpowiedź assistant (bez tool_calls).
-    Używamy oddzielnego żądania z `stream=True`, żeby drukować treść na żywo.
-    """
     try:
         from sys import stdout
+        _dbg("stream_start", meta=_summarize_messages(messages))
         with client.chat.completions.create(
             model=MODEL,
             messages=messages,
@@ -740,9 +558,11 @@ def stream_final_response(messages):
                     if chunk:
                         buf.append(chunk)
                         stdout.write(chunk); stdout.flush()
-            print()  # nowa linia po streamie
+            print()
+            _dbg("stream_end", bytes=sum(len(x) for x in buf))
             return "".join(buf)
     except Exception as e:
+        _dbg("stream_error", error=str(e)[:200])
         return f"[stream error] {e}"
 
 REVIEW_PROMPT = (
@@ -753,20 +573,10 @@ REVIEW_PROMPT = (
 )
 
 def review_and_apply(messages: List[Dict[str, Any]]) -> str:
-    """Drugi przebieg: poproś model o auto-recenzję i ewentualne zapisy plików.
-    Nic nie wypisuje na konsolę, chyba że zwróci błędy narzędzi.
-    Zwraca 'OK' albo krótki raport zmian.
-    """
     _msgs = list(messages) + [{"role": "user", "content": REVIEW_PROMPT}]
-
     _msgs = _trim_history(_msgs)
-    resp = _with_retry(client.chat.completions.create,
-        model=MODEL,
-        messages=_msgs,
-        tools=TOOLS_SPEC,
-        tool_choice="auto",
-        max_completion_tokens=MAX_OUTPUT_TOKENS,
-    )
+    _dbg("review_pass_start", meta=_summarize_messages(_msgs))
+    resp = _with_retry(_chat_create_with_limits, _msgs)
     msg = resp.choices[0].message
     applied = []
 
@@ -777,25 +587,17 @@ def review_and_apply(messages: List[Dict[str, Any]]) -> str:
             for tc in tool_calls:
                 fn = tc.function.name
                 args = json.loads(tc.function.arguments or "{}")
+                _dbg("review_tool_call", name=fn)
                 result = dispatch_tool(fn, args)
-                _msgs.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result)[:200000],
-                })
+                _msgs.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:200000]})
                 if fn in {"write_file", "write_files_batch"}:
-                    applied.append({"tool": fn, "result": result})
+                    applied.append({"tool": fn})
             _msgs = _trim_history(_msgs)
-            resp = _with_retry(client.chat.completions.create,
-                model=MODEL,
-                messages=_msgs,
-                tools=TOOLS_SPEC,
-                tool_choice="auto",
-                max_completion_tokens=MAX_OUTPUT_TOKENS,
-            )
+            resp = _with_retry(_chat_create_with_limits, _msgs)
             msg = resp.choices[0].message
             continue
         text = (msg.content or "").strip()
+        _dbg("review_pass_end", applied=len(applied), text=len(text))
         if applied:
             return f"Zastosowano {len(applied)} zmian przez narzędzia."
         return text if text else "OK"
@@ -803,12 +605,13 @@ def review_and_apply(messages: List[Dict[str, Any]]) -> str:
 # ───────────────────────── Pętla czatu ─────────────────────────
 
 def chat_loop() -> None:
-    console.print(Panel.fit(f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold]", title="CLI FS Bridge"))
+    console.print(Panel.fit(
+        f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold] | DEBUG: [bold]{int(DEBUG)}[/bold]",
+        title="CLI FS Bridge"
+    ))
     ctx = ensure_context_file()
     sys_prompt = build_system_prompt(ctx)
-    messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": sys_prompt},
-    ]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": sys_prompt}]
 
     while True:
         try:
@@ -825,6 +628,7 @@ def chat_loop() -> None:
 
         # Pierwsza odpowiedź
         messages = _trim_history(messages)
+        _dbg("loop_user", text=user_in)
         resp = _with_retry(chat_once, messages)
         msg = resp.choices[0].message
 
@@ -832,28 +636,19 @@ def chat_loop() -> None:
             tool_calls = getattr(msg, "tool_calls", None)
 
             if tool_calls:
-                # 1) Najpierw zapisz assistant z tool_calls do historii (wymóg API)
                 messages.append(to_assistant_message_with_tool_calls(msg))
-
-                # 2) Teraz wywołaj narzędzia i dołóż role: tool
                 for tc in tool_calls:
                     fn = tc.function.name
                     args = json.loads(tc.function.arguments or "{}")
+                    _dbg("loop_tool_call", name=fn)
                     result = dispatch_tool(fn, args)
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps(result)[:200000],
-                    })
-
-                # 3) Kolejna runda po narzędziach
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:200000]})
                 messages = _trim_history(messages)
                 resp = _with_retry(chat_once, messages)
                 msg = resp.choices[0].message
                 continue
 
-            # Brak tool_calls: mamy finalną odpowiedź
+            # Brak tool_calls: final
             if USE_STREAM:
                 final_text = stream_final_response(messages)
                 messages.append({"role": "assistant", "content": final_text})
@@ -863,7 +658,6 @@ def chat_loop() -> None:
                 console.print(Markdown(final_text))
             break
 
-        # Opcjonalny drugi przebieg (auto-recenzja i ewentualne zapisy), cicho.
         if REVIEW_PASS:
             try:
                 review_report = review_and_apply(messages)

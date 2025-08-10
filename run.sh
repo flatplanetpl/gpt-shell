@@ -5,7 +5,7 @@ if [ ! -d "venv" ]; then
   exit 1
 fi
 source venv/bin/activate
-# Autoload .env (jeśli istnieje)
+# Autoload .env (jeśli jest)
 [ -f .env ] && set -a && . ./.env && set +a
 : "${OPENAI_API_KEY:?Ustaw OPENAI_API_KEY w .env albo środowisku}"
 export OPENAI_MODEL="${OPENAI_MODEL:-gpt-5}"
@@ -16,4 +16,7 @@ export CLIFS_CONTEXT="${CLIFS_CONTEXT:-$PWD/clifs.context.json}"
 export MAX_BYTES_PER_READ="${MAX_BYTES_PER_READ:-60000}"
 export MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-1024}"
 export MAX_HISTORY_MSGS="${MAX_HISTORY_MSGS:-24}"
+export DEBUG="${DEBUG:-0}"
+export DEBUG_FORMAT="${DEBUG_FORMAT:-text}"
+export DEBUG_REDACT="${DEBUG_REDACT:-0}"
 python3 cli_assistant_fs.py
