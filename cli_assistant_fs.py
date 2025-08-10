@@ -753,10 +753,10 @@ REVIEW_PROMPT = (
 )
 
 def review_and_apply(messages: List[Dict[str, Any]]) -> str:
-    \"\"\"Drugi przebieg: poproś model o auto-recenzję i ewentualne zapisy plików.
+    """Drugi przebieg: poproś model o auto-recenzję i ewentualne zapisy plików.
     Nic nie wypisuje na konsolę, chyba że zwróci błędy narzędzi.
     Zwraca 'OK' albo krótki raport zmian.
-    \"\"\"
+    """
     _msgs = list(messages) + [{"role": "user", "content": REVIEW_PROMPT}]
 
     _msgs = _trim_history(_msgs)
