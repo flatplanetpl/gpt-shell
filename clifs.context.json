@@ -1,0 +1,33 @@
+{
+  "project": {
+    "name": "CLI FS Bridge",
+    "goals": [
+      "Pracować na plikach lokalnie w WORKDIR z backupami",
+      "Minimalne ryzyko: brak wykonywania komend domyślnie",
+      "Krótko odpowiadać po polsku",
+      "Kontynuować rozwój narzędzia w shellu"
+    ],
+    "constraints": [
+      "Generuj pełne pliki (write_file) zamiast diff",
+      "Szanuj IGNORE_GLOBS",
+      "Nie uruchamiaj komend, jeśli ALLOW_SHELL=0"
+    ]
+  },
+  "instructions": "Bądź zwięzły, techniczny i po polsku. Preferuj write_file nad diff. Zanim coś zmienisz, wczytaj plik read_file. Pracujemy w macOS z zsh i venv.",
+  "notes": [
+    "STREAM_PARTIAL=1, REVIEW_PASS=1",
+    "Domyślnie ALLOW_SHELL=0",
+    "Używaj narzędzi: list_tree, search_text, replace_text, write_files_batch"
+  ],
+  "ignore_globs": ".git,node_modules,dist,build,__pycache__,.venv,venv",
+  "macros": [
+    {
+      "name": "audit_nextjs",
+      "prompt": "Przejrzyj config Next.js i Dockerfile; zaproponuj usprawnienia i zapisz poprawki."
+    },
+    {
+      "name": "hardening",
+      "prompt": "Przejrzyj pliki pod kątem sekretów i dodaj/zmodyfikuj .gitignore oraz README sekcję bezpieczeństwa."
+    }
+  ]
+}
