@@ -202,7 +202,7 @@ AI> Szukam wystąpień process_data()...
 
 ## 📧 Kontakt
 
-Pytania i sugestie: [your-email@example.com]
+Pytania i sugestie: damian@lobsterbrew.pl
 
 ---
 
