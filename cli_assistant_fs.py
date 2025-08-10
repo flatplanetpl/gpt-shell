@@ -52,6 +52,7 @@ REVIEW_PASS = os.environ.get("REVIEW_PASS", "1") == "1"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 DEBUG_FORMAT = os.environ.get("DEBUG_FORMAT", "text")  # text|json
 DEBUG_REDACT = os.environ.get("DEBUG_REDACT", "0") == "1"
+DEBUG_FILE = os.environ.get("DEBUG_FILE", None)  # ścieżka do pliku z logami
 
 DEFAULT_MAX_BYTES = int(os.environ.get("MAX_BYTES_PER_READ", "40000"))
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1536"))
@@ -94,12 +95,22 @@ def _dbg(event: str, **fields):
             return s[:200] + ("…" if len(s) > 200 else "")
         except Exception:
             return str(v)[:200]
+    
     if DEBUG_FORMAT == "json":
         out = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event}
         out.update({k: _pv(v) for k, v in fields.items()})
-        print(json.dumps(out, ensure_ascii=False))
+        log_line = json.dumps(out, ensure_ascii=False)
     else:
-        print(" ".join([f"[{event}]"] + [f"{k}={_pv(v)}" for k, v in fields.items()]))
+        log_line = " ".join([f"[{event}]"] + [f"{k}={_pv(v)}" for k, v in fields.items()])
+    
+    print(log_line)
+    
+    if DEBUG_FILE:
+        try:
+            with open(DEBUG_FILE, "a", encoding="utf-8") as f:
+                f.write(log_line + "\n")
+        except Exception as e:
+            print(f"[DEBUG_FILE_ERROR] Nie można zapisać do {DEBUG_FILE}: {e}")
 
 # ── Koszty i usage ─────────────────────────────────────────────────────────────
 
@@ -355,26 +366,38 @@ def build_system_prompt(ctx: dict) -> str:
 # ── API helpers ────────────────────────────────────────────────────────────────
 
 def _chat_create_with_limits(messages: List[Dict[str, Any]]):
+    _dbg("chat_request", model=MODEL, messages_count=len(messages), max_tokens=MAX_OUTPUT_TOKENS)
+    if DEBUG:
+        _dbg("chat_request_messages", messages=messages)
     try:
         _dbg("chat_create_try", param="max_completion_tokens")
-        return client.chat.completions.create(
+        response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
             tools=TOOLS_SPEC,
             tool_choice="auto",
             max_completion_tokens=MAX_OUTPUT_TOKENS,
         )
+        _dbg("chat_response_success", usage=getattr(response, "usage", None))
+        if DEBUG:
+            _dbg("chat_response_full", response=response.model_dump() if hasattr(response, 'model_dump') else str(response))
+        return response
     except Exception as e1:
         s1 = str(e1)
+        _dbg("chat_response_error", error=s1)
         if "max_completion_tokens" in s1 or "unsupported parameter" in s1.lower():
             _dbg("chat_create_fallback", to="max_tokens", error=s1[:160])
-            return client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
                 tools=TOOLS_SPEC,
                 tool_choice="auto",
                 max_tokens=MAX_OUTPUT_TOKENS,
             )
+            _dbg("chat_response_fallback_success", usage=getattr(response, "usage", None))
+            if DEBUG:
+                _dbg("chat_response_fallback_full", response=response.model_dump() if hasattr(response, 'model_dump') else str(response))
+            return response
         raise
 
 def chat_once(messages: List[Dict[str, Any]]):
@@ -393,14 +416,20 @@ def to_assistant_message_with_tool_calls(msg) -> Dict[str, Any]:
     return out
 
 def stream_final_response(messages: List[Dict[str, Any]]) -> str:
+    _dbg("stream_request", model=MODEL, messages_count=len(messages))
+    if DEBUG:
+        _dbg("stream_request_messages", messages=messages)
     attempts = 0
     while True:
         attempts += 1
         try:
-            _dbg("stream_start")
+            _dbg("stream_start", attempt=attempts)
             with client.chat.completions.create(model=MODEL, messages=messages, stream=True) as stream:
                 buf = []
+                chunk_count = 0
                 for event in stream:
+                    chunk_count += 1
+                    _dbg("stream_chunk", chunk_num=chunk_count, event=event.model_dump() if hasattr(event, 'model_dump') else str(event))
                     if hasattr(event, "choices") and event.choices:
                         delta = event.choices[0].delta or {}
                         chunk = delta.get("content") or ""
@@ -408,8 +437,9 @@ def stream_final_response(messages: List[Dict[str, Any]]) -> str:
                             buf.append(chunk)
                             print(chunk, end="", flush=True)
                 print()
-                _dbg("stream_end", bytes=sum(len(x) for x in buf))
-                return "".join(buf)
+                final_content = "".join(buf)
+                _dbg("stream_end", chunks_received=chunk_count, bytes=len(final_content), content=final_content)
+                return final_content
         except Exception as e:
             msg = str(e).lower()
             retriable, hint = _is_retriable_error(e)
@@ -445,45 +475,62 @@ def _trim_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ── Pętla czatu ────────────────────────────────────────────────────────────────
 
 def chat_loop() -> None:
+    _dbg("app_start", workdir=str(WORKDIR), model=MODEL, debug=DEBUG)
     console.print(Panel.fit(f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold] | DEBUG: [bold]{int(DEBUG)}[/bold]", title="CLI FS Bridge"))
     ctx = ensure_context_file()
+    _dbg("context_loaded", context=ctx)
     sys_prompt = build_system_prompt(ctx)
     messages: List[Dict[str, Any]] = [{"role": "system", "content": sys_prompt}]
+    _dbg("initial_messages", messages=messages)
 
     while True:
         try:
+            _dbg("waiting_for_input")
             user_in = console.input("[bold green]Ty> [/bold green]")
+            _dbg("user_input", input=user_in)
         except (EOFError, KeyboardInterrupt):
+            _dbg("user_exit", reason="EOF_or_KeyboardInterrupt")
             console.print("\n[dim]Koniec.[/dim]"); break
         if not user_in.strip():
+            _dbg("empty_input")
             continue
         if user_in.strip() in {":q", ":quit", ":exit"}:
+            _dbg("user_exit", reason="quit_command")
             break
 
         messages.append({"role": "user", "content": user_in})
+        _dbg("messages_after_user", count=len(messages))
 
         turn_acc = {"p": 0, "c": 0}
 
         messages = _trim_history(messages)
+        _dbg("turn_start", messages_count=len(messages))
         resp = chat_once(messages)
         msg = resp.choices[0].message
+        _dbg("first_response", message_content=msg.content, has_tool_calls=bool(getattr(msg, "tool_calls", None)))
         _update_usage(turn_acc, getattr(resp, "usage", None))
 
         while True:
             tool_calls = getattr(msg, "tool_calls", None)
             if tool_calls:
+                _dbg("processing_tool_calls", count=len(tool_calls))
                 messages.append(to_assistant_message_with_tool_calls(msg))
                 for tc in tool_calls:
                     fn = tc.function.name
                     args = json.loads(tc.function.arguments or "{}")
+                    _dbg("tool_call_dispatch", function=fn, args=args)
                     result = dispatch_tool(fn, args)
+                    _dbg("tool_call_result", function=fn, result=result)
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:200000]})
                 messages = _trim_history(messages)
+                _dbg("tool_response_request", messages_count=len(messages))
                 resp = chat_once(messages)
                 msg = resp.choices[0].message
+                _dbg("tool_response", message_content=msg.content, has_more_tool_calls=bool(getattr(msg, "tool_calls", None)))
                 _update_usage(turn_acc, getattr(resp, "usage", None))
                 continue
 
+            _dbg("final_response_phase", use_stream=USE_STREAM)
             if USE_STREAM:
                 final_text = stream_final_response(messages)
                 messages.append({"role": "assistant", "content": final_text})
@@ -491,8 +538,10 @@ def chat_loop() -> None:
             else:
                 final_text = msg.content or ""
                 messages.append({"role": "assistant", "content": final_text})
+                _dbg("final_response_non_stream", content=final_text)
                 console.print(Markdown(final_text))
                 _print_turn_summary(turn_acc)
+            _dbg("turn_complete", final_messages_count=len(messages))
             break
 
 if __name__ == "__main__":
