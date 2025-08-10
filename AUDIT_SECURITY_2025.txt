@@ -1,0 +1,223 @@
+================================================================================
+                    AUDYT BEZPIECZEŃSTWA I KODU
+                    CLI FS Bridge (gpt-shell)
+                    Data: 2025-08-10
+================================================================================
+
+1. PODSUMOWANIE WYKONAWCZY
+================================================================================
+
+Aplikacja: Python CLI do integracji modeli AI z lokalnym systemem plików
+Status: WYSOKI POZIOM BEZPIECZEŃSTWA z drobnymi uwagami
+Ocena: 8.5/10
+
+Kluczowe zalety:
+✓ Solidna izolacja przez WORKDIR sandbox
+✓ Domyślnie wyłączone wykonywanie shell
+✓ Przemyślana obsługa błędów i retry logic
+✓ Redakcja wrażliwych danych w trybie debug
+
+Główne ryzyka:
+⚠ Brak rate limiting na poziomie aplikacji
+⚠ Możliwość wyczerpania pamięci przy dużych plikach
+⚠ Brak walidacji rozmiaru zapisu plików
+
+================================================================================
+2. ANALIZA BEZPIECZEŃSTWA
+================================================================================
+
+2.1 SANDBOXING I IZOLACJA
+---------------------------
+✓ MOCNE STRONY:
+  - Funkcja within_workdir() skutecznie blokuje path traversal
+  - Wszystkie operacje FS przechodzą przez weryfikację ścieżki
+  - Resolve() zapobiega atakom symlink
+  - Kontrola .startswith() po normalizacji
+
+⚠ POTENCJALNE SŁABOŚCI:
+  - Brak limitu na głębokość rekursji w list_tree
+  - Możliwość DoS przez żądanie bardzo głębokiego drzewa
+
+REKOMENDACJE:
+  - Dodać hard limit na liczbę plików w list_tree (np. 10000)
+  - Implementować timeout na operacje walk()
+
+2.2 WYKONYWANIE POLECEŃ
+------------------------
+✓ MOCNE STRONY:
+  - Shell domyślnie wyłączony (ALLOW_SHELL=0)
+  - Brak implementacji shell w kodzie (bezpieczne)
+  
+✓ BRAK RYZYKA:
+  - Nawet przy ALLOW_SHELL=1 kod nie wykonuje poleceń
+
+2.3 OBSŁUGA PLIKÓW
+-------------------
+✓ MOCNE STRONY:
+  - Limity na rozmiar odczytu (MAX_BYTES_PER_READ)
+  - Automatyczne backupy przed nadpisaniem
+  - Obsługa błędów Unicode z fallback
+
+⚠ SŁABOŚCI:
+  - Brak limitu na rozmiar zapisu write_file
+  - search_text może zużyć dużo RAM przy wielu wynikach
+  - Brak walidacji content-type (możliwość zapisu binarnych jako tekst)
+
+REKOMENDACJE:
+  - Dodać MAX_WRITE_SIZE limit
+  - Implementować streaming dla dużych plików
+  - Walidować UTF-8 przed zapisem
+
+2.4 API I UWIERZYTELNIANIE
+---------------------------
+✓ MOCNE STRONY:
+  - API key z zmiennej środowiskowej (nie hardcoded)
+  - Retry logic z exponential backoff
+  - Obsługa rate limits
+
+⚠ SŁABOŚCI:
+  - Brak szyfrowania lokalnych backupów
+  - API key widoczny w procesie (ps aux)
+
+REKOMENDACJE:
+  - Rozważyć keyring/keychain dla API key
+  - Implementować rotację kluczy
+
+2.5 LOGGING I DEBUG
+--------------------
+✓ MOCNE STRONY:
+  - Redakcja wrażliwych danych (DEBUG_REDACT=1)
+  - Strukturalne logi (JSON format)
+  - Kontrolowane ujawnianie informacji
+
+⚠ SŁABOŚCI:
+  - Logi mogą zawierać fragmenty plików użytkownika
+  - Brak rotacji logów
+
+================================================================================
+3. ANALIZA JAKOŚCI KODU
+================================================================================
+
+3.1 ARCHITEKTURA
+----------------
+✓ ZALETY:
+  - Czysta separacja warstw (FS, API, UI)
+  - Funkcjonalne podejście do tool dispatch
+  - Dobre użycie type hints
+
+⚠ OBSZARY DO POPRAWY:
+  - Brak klas - wszystko w funkcjach (może być trudne w utrzymaniu)
+  - Globalne zmienne (SESSION_ACC, client)
+  - Mieszanie logiki biznesowej z UI (console.print)
+
+3.2 OBSŁUGA BŁĘDÓW
+-------------------
+✓ ZALETY:
+  - Konsekwentne zwracanie dict z {"error": ...}
+  - Try/except w krytycznych miejscach
+  - Graceful degradation (stream → non-stream)
+
+⚠ PROBLEMY:
+  - Catch-all except w niektórych miejscach
+  - Brak logowania niektórych błędów
+  - Niekonsekwentne kody błędów
+
+3.3 WYDAJNOŚĆ
+--------------
+✓ OPTYMALIZACJE:
+  - Early return w search_text
+  - Lazy evaluation w _should_ignore
+  - Efektywne użycie pathlib
+
+⚠ PROBLEMY:
+  - os.walk może być wolne na dużych drzewach
+  - Brak cache dla powtarzających się operacji
+  - read_text() ładuje cały plik do pamięci
+
+3.4 TESTOWALNOŚĆ
+-----------------
+⚠ BRAKI:
+  - Brak testów jednostkowych
+  - Trudne do mockowania (globalne client)
+  - Brak dependency injection
+
+REKOMENDACJE:
+  - Dodać pytest z fixtures
+  - Refactor na klasy z DI
+  - Mock filesystem w testach
+
+================================================================================
+4. ANALIZA ZALEŻNOŚCI
+================================================================================
+
+UŻYTE BIBLIOTEKI:
+- openai >= 1.30.0 - BEZPIECZNA, aktualnie utrzymywana
+- rich >= 13.7.0 - BEZPIECZNA, popularna, bez znanych CVE
+
+SYSTEMOWE:
+- Python 3.x (brak specific version - UWAGA)
+- pathlib, json, os, sys - standardowe, bezpieczne
+- shutil - potencjalne ryzyko przy kopiowaniu dużych plików
+
+REKOMENDACJE:
+- Określić minimalną wersję Python (np. >=3.8)
+- Dodać pip-audit do CI/CD
+- Regularnie aktualizować zależności
+
+================================================================================
+5. COMPLIANCE I PRYWATNOŚĆ
+================================================================================
+
+✓ GDPR/RODO:
+  - Brak zbierania danych osobowych
+  - Lokalne przetwarzanie
+  - Możliwość redakcji w logach
+
+✓ LICENCJONOWANIE:
+  - Brak informacji o licencji (DO UZUPEŁNIENIA)
+  - Zależności mają kompatybilne licencje (MIT/Apache)
+
+⚠ PROBLEMY:
+  - Brak polityki przechowywania backupów
+  - Brak informacji o retention dla logów
+
+================================================================================
+6. REKOMENDACJE PRIORYTETOWE
+================================================================================
+
+KRYTYCZNE (wykonać natychmiast):
+1. [ ] Dodać limit na write_file (MAX_WRITE_SIZE)
+2. [ ] Implementować hard limit w list_tree
+3. [ ] Dodać walidację UTF-8 przed zapisem
+
+WAŻNE (wykonać w ciągu tygodnia):
+4. [ ] Napisać testy jednostkowe (pytest)
+5. [ ] Dodać rate limiting lokalny
+6. [ ] Implementować rotację logów
+7. [ ] Określić minimalną wersję Python
+
+NICE-TO-HAVE (długoterminowe):
+8. [ ] Refactor na klasy z DI
+9. [ ] Dodać metryki wydajności
+10. [ ] Implementować cache dla częstych operacji
+11. [ ] Dodać wsparcie dla różnych encodings
+
+================================================================================
+7. PODSUMOWANIE
+================================================================================
+
+Aplikacja wykazuje WYSOKI poziom świadomości bezpieczeństwa. Główne 
+mechanizmy ochronne są dobrze zaimplementowane. Kod jest czytelny i 
+dobrze udokumentowany.
+
+Główne obszary do poprawy to:
+- Brak testów
+- Limity na operacje zapisu
+- Formalizacja architektury (klasy)
+
+Aplikacja jest BEZPIECZNA DO UŻYTKU w środowisku kontrolowanym, 
+z zastrzeżeniem implementacji rekomendacji krytycznych.
+
+================================================================================
+                              KONIEC AUDYTU
+================================================================================
