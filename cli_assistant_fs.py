@@ -676,7 +676,7 @@ def chat_once(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         messages=messages,
         tools=TOOLS_SPEC,
         tool_choice="auto",
-        max_output_tokens=MAX_OUTPUT_TOKENS,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
 
 def _trim_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -765,7 +765,7 @@ def review_and_apply(messages: List[Dict[str, Any]]) -> str:
         messages=_msgs,
         tools=TOOLS_SPEC,
         tool_choice="auto",
-        max_output_tokens=MAX_OUTPUT_TOKENS,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
     msg = resp.choices[0].message
     applied = []
@@ -791,7 +791,7 @@ def review_and_apply(messages: List[Dict[str, Any]]) -> str:
                 messages=_msgs,
                 tools=TOOLS_SPEC,
                 tool_choice="auto",
-                max_output_tokens=MAX_OUTPUT_TOKENS,
+                max_tokens=MAX_OUTPUT_TOKENS,
             )
             msg = resp.choices[0].message
             continue

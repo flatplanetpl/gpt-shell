@@ -6,14 +6,9 @@ Lokalny most między Twoim terminalem a modelem. Czyta i edytuje pliki w **WORKD
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-export OPENAI_API_KEY="twój_klucz_api_openai"
-export WORKDIR="$PWD"
-export OPENAI_MODEL="gpt-5"
-export STREAM_PARTIAL=1     # strumieniowanie końcowej odpowiedzi
-export REVIEW_PASS=1        # drugi, cichy przebieg auto-recenzji
-pip install --upgrade pip
-pip install -r requirements.txt
-python3 cli_assistant_fs.py
+cp .env.example .env && $EDITOR .env
+./setup.sh
+./run.sh
 ```
 
 ## Użyteczne polecenia (w interfejsie "Ty>")
@@ -70,6 +65,7 @@ Hard-kill jest zablokowany filtrami.
 - `CMD_TIMEOUT` — timeout dla komend
 - `GIT_AUTOSNAPSHOT` — rezerwowe (tu: manualny snapshot przez `git_snapshot`)
 - `IGNORE_GLOBS` — lista globów po przecinku, np. `.git,node_modules,dist`
+- `CLIFS_CONTEXT` — ścieżka do pliku kontekstu
 
 ## Wymagania
 - Python 3.10+

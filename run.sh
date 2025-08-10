@@ -5,7 +5,9 @@ if [ ! -d "venv" ]; then
   exit 1
 fi
 source venv/bin/activate
-: "${OPENAI_API_KEY:?Ustaw OPENAI_API_KEY}"
+# Autoload .env (jeśli istnieje)
+[ -f .env ] && set -a && . ./.env && set +a
+: "${OPENAI_API_KEY:?Ustaw OPENAI_API_KEY w .env albo środowisku}"
 export OPENAI_MODEL="${OPENAI_MODEL:-gpt-5}"
 export WORKDIR="${WORKDIR:-$PWD}"
 export STREAM_PARTIAL="${STREAM_PARTIAL:-1}"
