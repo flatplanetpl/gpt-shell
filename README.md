@@ -1,431 +1,431 @@
 # CLI FS Bridge
 
-**Bezpieczny interfejs CLI do integracji modeli AI z lokalnym systemem plików**
+**Secure CLI interface for AI model integration with local filesystem**
 
-CLI FS Bridge to narzędzie pozwalające modelom językowym (LLM) na bezpieczną interakcję z systemem plików poprzez kontrolowane API. Aplikacja tworzy sandboxowane środowisko, w którym AI może czytać, zapisywać i przeszukiwać pliki, zachowując pełną kontrolę bezpieczeństwa.
+CLI FS Bridge is a tool that allows language models (LLMs) to safely interact with the filesystem through a controlled API. The application creates a sandboxed environment where AI can read, write, and search files while maintaining full security control.
 
-## 🎯 Główne zastosowania
+## 🎯 Main Use Cases
 
-- **Automatyzacja zadań programistycznych** - AI może analizować kod, generować pliki, refaktoryzować
-- **Przetwarzanie dokumentów** - masowe operacje na plikach tekstowych z inteligentną analizą
-- **Asystent deweloperski** - interaktywna pomoc przy debugowaniu i rozwoju projektów
-- **Analiza kodu** - przeszukiwanie i analiza dużych baz kodu
-- **Generowanie raportów** - automatyczne tworzenie dokumentacji na podstawie struktury projektu
+- **Programming task automation** - AI can analyze code, generate files, refactor
+- **Document processing** - bulk operations on text files with intelligent analysis
+- **Developer assistant** - interactive help with debugging and project development
+- **Code analysis** - searching and analyzing large codebases
+- **Report generation** - automatic documentation creation based on project structure
 
-## ✨ Kluczowe funkcje
+## ✨ Key Features
 
-- 🔒 **Sandbox bezpieczeństwa** - wszystkie operacje ograniczone do zdefiniowanego katalogu roboczego
-- 🚀 **6 bezpiecznych narzędzi filesystem** - list_dir, read_file, write_file, search_text i więcej
-- 🔄 **Inteligentna obsługa błędów** - automatyczne retry z exponential backoff dla rate limits
-- 📊 **Śledzenie kosztów** - licznik tokenów i szacowanie kosztów w czasie rzeczywistym
-- 🎨 **Bogaty interfejs CLI** - formatowanie Markdown, panele, kolorowanie składni
-- 🔍 **Tryb debug** - szczegółowe logi z opcją redakcji wrażliwych danych
-- 💾 **Automatyczne backupy** - każda modyfikacja pliku tworzy kopię zapasową
+- 🔒 **Security sandbox** - all operations limited to defined working directory
+- 🚀 **6 secure filesystem tools** - list_dir, read_file, write_file, search_text and more
+- 🔄 **Intelligent error handling** - automatic retry with exponential backoff for rate limits
+- 📊 **Cost tracking** - token counter and real-time cost estimation
+- 🎨 **Rich CLI interface** - Markdown formatting, panels, syntax highlighting
+- 🔍 **Debug mode** - detailed logs with sensitive data redaction option
+- 💾 **Automatic backups** - every file modification creates a backup copy
 
-## 🚀 Szybki start
+## 🚀 Quick Start
 
-### Wymagania
+### Requirements
 
 - Python 3.8+
-- Klucz API OpenAI
-- macOS lub Linux (Windows z WSL)
+- OpenAI API key
+- macOS or Linux (Windows with WSL)
 
-### Instalacja
+### Installation
 
 ```bash
-# Klonowanie repozytorium
+# Clone repository
 git clone https://github.com/yourusername/gpt-shell.git
 cd gpt-shell
 
-# Automatyczna konfiguracja
+# Automatic setup
 ./setup.sh
 
-# Konfiguracja zmiennych środowiskowych
+# Configure environment variables
 cp .env.example .env
-nano .env  # Dodaj swój OPENAI_API_KEY
+nano .env  # Add your OPENAI_API_KEY
 
-# Uruchomienie
+# Run
 ./run.sh
 ```
 
-### Konfiguracja ręczna
+### Manual configuration
 
 ```bash
-# Utworzenie środowiska wirtualnego
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Instalacja zależności
+# Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Uruchomienie
+# Run
 python cli_assistant_fs.py
 ```
 
-## ⚙️ Konfiguracja
+## ⚙️ Configuration
 
-### Zmienne środowiskowe (.env)
+### Environment variables (.env)
 
 ```bash
-# Wymagane
-OPENAI_API_KEY=sk-...          # Twój klucz API
+# Required
+OPENAI_API_KEY=sk-...          # Your API key
 
-# Model AI
-OPENAI_MODEL=gpt-4             # Domyślnie: gpt-5
+# AI Model
+OPENAI_MODEL=gpt-4             # Default: gpt-5
 
-# Bezpieczeństwo
-WORKDIR=/path/to/safe/dir      # Katalog roboczy (domyślnie: bieżący)
-ALLOW_SHELL=0                   # Wykonywanie poleceń shell (0=wyłączone)
+# Security
+WORKDIR=/path/to/safe/dir      # Working directory (default: current)
+ALLOW_SHELL=0                   # Shell command execution (0=disabled)
 
-# Limity
-MAX_BYTES_PER_READ=40000       # Max bajtów na odczyt pliku
-MAX_OUTPUT_TOKENS=1536         # Max tokenów odpowiedzi
-MAX_HISTORY_MSGS=16            # Max wiadomości w historii
+# Limits
+MAX_BYTES_PER_READ=40000       # Max bytes per file read
+MAX_OUTPUT_TOKENS=1536         # Max response tokens
+MAX_HISTORY_MSGS=16            # Max messages in history
 
 # Debug
-DEBUG=0                        # Tryb debug (0/1)
-DEBUG_FORMAT=text              # Format logów (text/json)
-DEBUG_REDACT=0                 # Redakcja wrażliwych danych (0/1)
+DEBUG=0                        # Debug mode (0/1)
+DEBUG_FORMAT=text              # Log format (text/json)
+DEBUG_REDACT=0                 # Sensitive data redaction (0/1)
 
-# Koszty (USD per 1M tokenów)
-OPENAI_INPUT_PRICE_PER_M=5.0   # Cena tokenów wejściowych
-OPENAI_OUTPUT_PRICE_PER_M=15.0 # Cena tokenów wyjściowych
+# Costs (USD per 1M tokens)
+OPENAI_INPUT_PRICE_PER_M=5.0   # Input token price
+OPENAI_OUTPUT_PRICE_PER_M=15.0 # Output token price
 ```
 
-### Kontekst projektu (clifs.context.json)
+### Project context (clifs.context.json)
 
 ```json
 {
-  "instructions": "Dodatkowe instrukcje dla AI...",
-  "project_goals": "Cele projektu...",
-  "constraints": "Ograniczenia..."
+  "instructions": "Additional instructions for AI...",
+  "project_goals": "Project goals...",
+  "constraints": "Constraints..."
 }
 ```
 
-## 📚 Dostępne narzędzia
+## 📚 Available Tools
 
-| Narzędzie | Opis | Przykład użycia |
-|-----------|------|-----------------|
-| `list_dir` | Listuje pliki i katalogi | "Pokaż zawartość katalogu src/" |
-| `read_file` | Czyta plik (z limitem bajtów) | "Przeczytaj plik config.py" |
-| `read_file_range` | Czyta fragment dużego pliku | "Pokaż linie 100-200 z log.txt" |
-| `write_file` | Zapisuje lub nadpisuje plik | "Utwórz plik test.py z kodem..." |
-| `list_tree` | Pokazuje drzewo katalogów | "Pokaż strukturę projektu" |
-| `search_text` | Szuka wzorca w plikach | "Znajdź wszystkie wystąpienia 'TODO'" |
+| Tool | Description | Usage Example |
+|------|-------------|---------------|
+| `list_dir` | Lists files and directories | "Show contents of src/ directory" |
+| `read_file` | Reads file (with byte limit) | "Read config.py file" |
+| `read_file_range` | Reads fragment of large file | "Show lines 100-200 from log.txt" |
+| `write_file` | Writes or overwrites file | "Create test.py file with code..." |
+| `list_tree` | Shows directory tree | "Show project structure" |
+| `search_text` | Searches for pattern in files | "Find all occurrences of 'TODO'" |
 
-## 🔒 Bezpieczeństwo
+## 🔒 Security
 
-### Mechanizmy ochronne
+### Protection mechanisms
 
-- **Sandbox WORKDIR** - niemożność wyjścia poza zdefiniowany katalog
-- **Path traversal protection** - blokada ataków typu `../../../etc/passwd`
-- **Wyłączone polecenia shell** - domyślnie brak możliwości wykonania komend systemowych
-- **Limity odczytu** - ochrona przed wyczerpaniem pamięci
-- **Automatyczne backupy** - zabezpieczenie przed utratą danych
-- **Ignorowanie wrażliwych katalogów** - `.git`, `node_modules`, klucze
+- **WORKDIR Sandbox** - impossible to exit the defined directory
+- **Path traversal protection** - blocks attacks like `../../../etc/passwd`
+- **Disabled shell commands** - no system command execution by default
+- **Read limits** - protection against memory exhaustion
+- **Automatic backups** - protection against data loss
+- **Ignoring sensitive directories** - `.git`, `node_modules`, keys
 
-### Audyt bezpieczeństwa
+### Security audit
 
-Pełny audyt dostępny w pliku [AUDIT_SECURITY_2025.txt](AUDIT_SECURITY_2025.txt)
+Full audit available in [AUDIT_SECURITY_2025.txt](AUDIT_SECURITY_2025.txt)
 
-## 🐛 Tryb Debug
+## 🐛 Debug Mode
 
 ```bash
-# Debug w formacie tekstowym
+# Debug in text format
 DEBUG=1 DEBUG_FORMAT=text ./run.sh
 
-# Debug w formacie JSON
+# Debug in JSON format
 DEBUG=1 DEBUG_FORMAT=json ./run.sh
 
-# Debug z redakcją danych
+# Debug with data redaction
 DEBUG=1 DEBUG_REDACT=1 ./run.sh
 ```
 
-## 📖 Przykłady użycia
+## 📖 Usage Examples
 
-### 🔍 Analiza i audyt kodu
+### 🔍 Code Analysis and Audit
 
-#### Znajdowanie podatności bezpieczeństwa
+#### Finding security vulnerabilities
 ```
-Ty> Przeszukaj projekt pod kątem potencjalnych luk bezpieczeństwa typu SQL injection lub XSS
+You> Search the project for potential security vulnerabilities like SQL injection or XSS
 
-AI> Analizuję pliki pod kątem bezpieczeństwa...
-Znalazłem 3 potencjalne problemy:
-1. views.py:45 - Niezabezpieczone zapytanie SQL z user input
-2. templates/form.html:12 - Brak escapowania danych użytkownika
-3. api.py:89 - Brak walidacji typu Content-Type
-[Szczegółowy raport z sugestiami naprawy]
-```
-
-#### Analiza złożoności kodu
-```
-Ty> Znajdź najbardziej skomplikowane funkcje w projekcie i zasugeruj refaktoryzację
-
-AI> Analizuję złożoność cyklomatyczną...
-Top 3 najbardziej złożone funkcje:
-1. process_payment() - złożoność: 15 (utils/payment.py:234)
-2. validate_order() - złożoność: 12 (models/order.py:567) 
-3. calculate_discount() - złożoność: 11 (services/pricing.py:89)
-[Propozycje refaktoryzacji dla każdej funkcji]
+AI> Analyzing files for security issues...
+Found 3 potential problems:
+1. views.py:45 - Unprotected SQL query with user input
+2. templates/form.html:12 - Missing user data escaping
+3. api.py:89 - Missing Content-Type validation
+[Detailed report with fix suggestions]
 ```
 
-### 📝 Automatyczne generowanie kodu
-
-#### Tworzenie testów jednostkowych
+#### Code complexity analysis
 ```
-Ty> Napisz testy jednostkowe dla klasy UserService w services/user.py
+You> Find the most complex functions in the project and suggest refactoring
 
-AI> Analizuję klasę UserService...
-Tworzę plik tests/test_user_service.py z 15 testami pokrywającymi:
-- Tworzenie użytkownika
-- Walidację email
-- Hashowanie hasła
-- Obsługę błędów
-[Generuje kompletny plik z testami pytest]
+AI> Analyzing cyclomatic complexity...
+Top 3 most complex functions:
+1. process_payment() - complexity: 15 (utils/payment.py:234)
+2. validate_order() - complexity: 12 (models/order.py:567) 
+3. calculate_discount() - complexity: 11 (services/pricing.py:89)
+[Refactoring proposals for each function]
 ```
 
-#### Generowanie CRUD API
+### 📝 Automatic Code Generation
+
+#### Creating unit tests
 ```
-Ty> Stwórz REST API dla modelu Product z pełnym CRUD
+You> Write unit tests for the UserService class in services/user.py
 
-AI> Tworzę endpoint API dla Product...
-Generuję:
-- routes/product.py - endpoints GET/POST/PUT/DELETE
-- schemas/product.py - walidacja Pydantic
-- tests/test_product_api.py - testy integracyjne
-[Tworzy kompletną strukturę API]
-```
-
-### 🛠️ Refaktoryzacja i migracje
-
-#### Migracja z JavaScript na TypeScript
-```
-Ty> Przekonwertuj wszystkie pliki .js w katalogu components/ na TypeScript
-
-AI> Rozpoczynam migrację do TypeScript...
-Znalazłem 12 plików JavaScript.
-Konwertuję:
-- Button.js → Button.tsx (dodaję typy dla props)
-- Modal.js → Modal.tsx (definiuję interfejsy)
-- Form.js → Form.tsx (typowanie event handlers)
-[Automatyczna konwersja z zachowaniem logiki]
+AI> Analyzing UserService class...
+Creating tests/test_user_service.py with 15 tests covering:
+- User creation
+- Email validation
+- Password hashing
+- Error handling
+[Generates complete pytest file]
 ```
 
-#### Modernizacja składni Python
+#### Generating CRUD API
 ```
-Ty> Zaktualizuj kod Python 2 do Python 3 w całym projekcie
+You> Create REST API for Product model with full CRUD
 
-AI> Skanuje w poszukiwaniu składni Python 2...
-Znalazłem przestarzałe elementy:
+AI> Creating Product API endpoints...
+Generating:
+- routes/product.py - GET/POST/PUT/DELETE endpoints
+- schemas/product.py - Pydantic validation
+- tests/test_product_api.py - integration tests
+[Creates complete API structure]
+```
+
+### 🛠️ Refactoring and Migrations
+
+#### JavaScript to TypeScript migration
+```
+You> Convert all .js files in components/ directory to TypeScript
+
+AI> Starting TypeScript migration...
+Found 12 JavaScript files.
+Converting:
+- Button.js → Button.tsx (adding prop types)
+- Modal.js → Modal.tsx (defining interfaces)
+- Form.js → Form.tsx (typing event handlers)
+[Automatic conversion preserving logic]
+```
+
+#### Python syntax modernization
+```
+You> Update Python 2 code to Python 3 throughout the project
+
+AI> Scanning for Python 2 syntax...
+Found outdated elements:
 - 8x print statements → print()
 - 3x .iteritems() → .items()
 - 5x xrange → range
 - 2x unicode() → str()
-[Wykonuje migrację z backupami]
+[Performs migration with backups]
 ```
 
-### 📊 Analiza projektu i raportowanie
+### 📊 Project Analysis and Reporting
 
-#### Generowanie dokumentacji z kodu
+#### Generating documentation from code
 ```
-Ty> Wygeneruj dokumentację Markdown dla wszystkich klas w module core/
+You> Generate Markdown documentation for all classes in core/ module
 
-AI> Analizuję moduł core/...
-Znalazłem 8 klas, 42 metody publiczne.
-Generuję docs/core-api.md:
+AI> Analyzing core/ module...
+Found 8 classes, 42 public methods.
+Generating docs/core-api.md:
 # Core Module API
 ## Class: DatabaseConnection
 ### Methods:
 - connect() - Establishes database connection
 - execute(query, params) - Executes SQL query
-[Pełna dokumentacja z przykładami użycia]
+[Complete documentation with usage examples]
 ```
 
-#### Analiza zależności
+#### Dependency analysis
 ```
-Ty> Sprawdź które pakiety w requirements.txt są nieużywane
+You> Check which packages in requirements.txt are unused
 
-AI> Analizuję importy w projekcie...
-Nieużywane pakiety:
-- pandas==1.3.0 (brak importów)
-- requests-mock==1.9.3 (tylko w zakomentowanym kodzie)
-- python-dotenv==0.19.0 (zastąpione przez os.environ)
-Sugeruję usunięcie lub aktualizację requirements.txt
-```
-
-### 🐛 Debugging i diagnostyka
-
-#### Analiza logów błędów
-```
-Ty> Przeanalizuj error.log i znajdź najczęstsze błędy
-
-AI> Analizuję plik error.log (2.3MB, 15432 linii)...
-Top 5 błędów:
-1. ConnectionTimeout (1823 wystąpień) - głównie między 14:00-15:00
-2. KeyError 'user_id' (456 wystąpień) - endpoint /api/profile
-3. ValueError invalid literal (234 wystąpienia) - parsowanie daty
-4. FileNotFoundError (123 wystąpienia) - brak config.json
-5. MemoryError (45 wystąpień) - podczas przetwarzania dużych plików
-[Sugestie rozwiązań dla każdego błędu]
+AI> Analyzing imports in project...
+Unused packages:
+- pandas==1.3.0 (no imports found)
+- requests-mock==1.9.3 (only in commented code)
+- python-dotenv==0.19.0 (replaced by os.environ)
+Suggest removing or updating requirements.txt
 ```
 
-#### Znajdowanie wycieków pamięci
+### 🐛 Debugging and Diagnostics
+
+#### Error log analysis
 ```
-Ty> Sprawdź czy są wycieki pamięci w plikach Python
+You> Analyze error.log and find the most common errors
 
-AI> Skanuje kod pod kątem potencjalnych wycieków...
-Znalazłem problematyczne wzorce:
-1. data_processor.py:78 - Niezamknięty file handler
-2. cache_manager.py:234 - Circular reference w cache
-3. worker.py:156 - Global list rosnący bez limitu
-[Kod naprawczy dla każdego przypadku]
+AI> Analyzing error.log file (2.3MB, 15432 lines)...
+Top 5 errors:
+1. ConnectionTimeout (1823 occurrences) - mainly between 14:00-15:00
+2. KeyError 'user_id' (456 occurrences) - endpoint /api/profile
+3. ValueError invalid literal (234 occurrences) - date parsing
+4. FileNotFoundError (123 occurrences) - missing config.json
+5. MemoryError (45 occurrences) - during large file processing
+[Solution suggestions for each error]
 ```
 
-### 🔄 Automatyzacja zadań
-
-#### Bulk rename plików
+#### Finding memory leaks
 ```
-Ty> Zmień nazwy wszystkich plików test_*.py na *_test.py w projekcie
+You> Check for memory leaks in Python files
 
-AI> Wyszukuję pliki test_*.py...
-Znalazłem 23 pliki do zmiany nazwy:
+AI> Scanning code for potential leaks...
+Found problematic patterns:
+1. data_processor.py:78 - Unclosed file handler
+2. cache_manager.py:234 - Circular reference in cache
+3. worker.py:156 - Global list growing without limit
+[Fix code for each case]
+```
+
+### 🔄 Task Automation
+
+#### Bulk file renaming
+```
+You> Rename all test_*.py files to *_test.py in the project
+
+AI> Searching for test_*.py files...
+Found 23 files to rename:
 - test_auth.py → auth_test.py
 - test_database.py → database_test.py
 - test_api.py → api_test.py
-[Wykonuje zmianę nazw z logowaniem]
+[Performs renaming with logging]
 ```
 
-#### Czyszczenie kodu
+#### Code cleanup
 ```
-Ty> Usuń wszystkie zakomentowane fragmenty kodu i console.log z projektu
+You> Remove all commented code blocks and console.log from the project
 
-AI> Skanuje pliki w poszukiwaniu martwego kodu...
-Znalazłem:
-- 67 bloków zakomentowanego kodu
-- 23 wywołania console.log
-- 12 instrukcji debugger
-Tworzę backup przed czyszczeniem...
-[Usuwa z zachowaniem historii w .backup/]
-```
-
-### 📈 Optymalizacja wydajności
-
-#### Znajdowanie N+1 queries
-```
-Ty> Sprawdź czy są problemy N+1 w modelach Django
-
-AI> Analizuję modele i views...
-Potencjalne problemy N+1:
-1. views.py:89 - Post.objects.all() bez select_related('author')
-2. serializers.py:45 - Iteracja po comments bez prefetch
-3. admin.py:23 - Multiple queries w list_display
-[Proponuje użycie select_related/prefetch_related]
+AI> Scanning files for dead code...
+Found:
+- 67 commented code blocks
+- 23 console.log calls
+- 12 debugger statements
+Creating backup before cleanup...
+[Removes while preserving history in .backup/]
 ```
 
-#### Optymalizacja importów
+### 📈 Performance Optimization
+
+#### Finding N+1 queries
 ```
-Ty> Zoptymalizuj importy - usuń nieużywane i posortuj
+You> Check for N+1 query problems in Django models
 
-AI> Analizuję importy w 45 plikach Python...
-Usuwam 89 nieużywanych importów:
-- 23x 'from typing import Optional' (nieużywane)
-- 15x 'import json' (nieużywane)
-- 8x 'from datetime import datetime' (duplikaty)
-Sortuję według konwencji PEP8...
-[Reorganizuje importy w całym projekcie]
+AI> Analyzing models and views...
+Potential N+1 problems:
+1. views.py:89 - Post.objects.all() without select_related('author')
+2. serializers.py:45 - Iteration over comments without prefetch
+3. admin.py:23 - Multiple queries in list_display
+[Suggests using select_related/prefetch_related]
 ```
 
-### 🌐 Integracje i API
-
-#### Generowanie klienta API z OpenAPI
+#### Import optimization
 ```
-Ty> Mam plik openapi.yaml - wygeneruj klienta Python
+You> Optimize imports - remove unused and sort
 
-AI> Parsuje specyfikację OpenAPI...
-Znalazłem 12 endpoints, generuję:
-- client/api.py - klasa główna APIClient
-- client/models.py - 8 modeli Pydantic
+AI> Analyzing imports in 45 Python files...
+Removing 89 unused imports:
+- 23x 'from typing import Optional' (unused)
+- 15x 'import json' (unused)
+- 8x 'from datetime import datetime' (duplicates)
+Sorting according to PEP8 convention...
+[Reorganizes imports throughout the project]
+```
+
+### 🌐 Integrations and API
+
+#### Generating API client from OpenAPI
+```
+You> I have an openapi.yaml file - generate a Python client
+
+AI> Parsing OpenAPI specification...
+Found 12 endpoints, generating:
+- client/api.py - main APIClient class
+- client/models.py - 8 Pydantic models
 - client/exceptions.py - custom exceptions
-- examples/usage.py - przykłady użycia
-[Kompletny klient z type hints]
+- examples/usage.py - usage examples
+[Complete client with type hints]
 ```
 
-#### Tworzenie webhooków
+#### Creating webhooks
 ```
-Ty> Dodaj obsługę webhooków dla wydarzeń user.created i order.completed
+You> Add webhook support for user.created and order.completed events
 
-AI> Tworzę system webhooków...
-Generuję:
-- webhooks/handlers.py - obsługa wydarzeń
-- webhooks/models.py - model WebhookSubscription
-- webhooks/sender.py - async wysyłanie z retry
-- webhooks/verify.py - weryfikacja podpisów HMAC
-[Pełna implementacja z kolejkowaniem]
+AI> Creating webhook system...
+Generating:
+- webhooks/handlers.py - event handlers
+- webhooks/models.py - WebhookSubscription model
+- webhooks/sender.py - async sending with retry
+- webhooks/verify.py - HMAC signature verification
+[Full implementation with queuing]
 ```
 
-## 💪 Przewaga nad GitHub Copilot/Codex
+## 💪 Advantage over GitHub Copilot/Codex
 
-### 🗂️ Dostęp do lokalnych plików i danych
+### 🗂️ Access to local files and data
 
-W przeciwieństwie do GitHub Copilot, który działa tylko w kontekście edytora, CLI FS Bridge ma pełny dostęp do systemu plików w sandboxie.
+Unlike GitHub Copilot, which only works within the editor context, CLI FS Bridge has full access to the filesystem within the sandbox.
 
-#### Analiza lokalnych logów produkcyjnych
+#### Analysis of local production logs
 ```
-Ty> Mam logi z produkcji w ~/logs/prod-2024-12-15.log (200MB) - znajdź wszystkie błędy 500 i zrób statystyki
+You> I have production logs in ~/logs/prod-2024-12-15.log (200MB) - find all 500 errors and create statistics
 
-AI> Czytam plik ~/logs/prod-2024-12-15.log...
-Analizuję 1,245,332 linii logów...
+AI> Reading file ~/logs/prod-2024-12-15.log...
+Analyzing 1,245,332 log lines...
 
-Znalazłem 3,421 błędów HTTP 500:
-- 67% - Database connection timeout (głównie 02:00-04:00)
-- 23% - Redis cache miss podczas heavy load
+Found 3,421 HTTP 500 errors:
+- 67% - Database connection timeout (mainly 02:00-04:00)
+- 23% - Redis cache miss during heavy load
 - 8% - External API timeout (payment gateway)
-- 2% - Out of memory w image processing
+- 2% - Out of memory in image processing
 
-Generuję szczegółowy raport: error_analysis_2024-12-15.md
-[Tworzy raport z wykresami czasowymi i rekomendacjami]
+Generating detailed report: error_analysis_2024-12-15.md
+[Creates report with time charts and recommendations]
 ```
 
-#### Praca z lokalnymi bazami danych
+#### Working with local databases
 ```
-Ty> Połącz się z moją lokalną bazą SQLite w ~/data/customers.db i wygeneruj modele Pydantic
+You> Connect to my local SQLite database in ~/data/customers.db and generate Pydantic models
 
-AI> Łączę się z ~/data/customers.db...
-Znalazłem 8 tabel:
-- customers (15 kolumn)
-- orders (12 kolumn)
-- products (8 kolumn)
+AI> Connecting to ~/data/customers.db...
+Found 8 tables:
+- customers (15 columns)
+- orders (12 columns)
+- products (8 columns)
 ...
 
-Generuję models/database.py z modelami Pydantic:
-[Tworzy kompletne modele na podstawie rzeczywistej struktury DB]
+Generating models/database.py with Pydantic models:
+[Creates complete models based on actual DB structure]
 ```
 
-#### Analiza prywatnych konfiguracji
+#### Analysis of private configurations
 ```
-Ty> Sprawdź moje wszystkie pliki .env w ~/projects/ i znajdź duplikaty kluczy API
+You> Check all .env files in ~/projects/ and find duplicate API keys
 
-AI> Skanuje katalog ~/projects/ w poszukiwaniu plików .env...
-Znalazłem 12 plików .env w różnych projektach.
+AI> Scanning ~/projects/ directory for .env files...
+Found 12 .env files in different projects.
 
-Duplikaty kluczy API:
-- STRIPE_KEY używany w 3 projektach (ten sam klucz!)
-- SENDGRID_KEY w 2 projektach
-- AWS_ACCESS_KEY w 5 projektach (3 różne klucze)
+Duplicate API keys:
+- STRIPE_KEY used in 3 projects (same key!)
+- SENDGRID_KEY in 2 projects
+- AWS_ACCESS_KEY in 5 projects (3 different keys)
 
-⚠️ ALERT: Używasz tego samego STRIPE_KEY w produkcji i developmencie!
-[Generuje raport bezpieczeństwa z rekomendacjami]
+⚠️ ALERT: Using same STRIPE_KEY in production and development!
+[Generates security report with recommendations]
 ```
 
-### 🔧 Custom Tools - Rozszerzanie możliwości
+### 🔧 Custom Tools - Extending capabilities
 
-#### Przykład: Dodanie narzędzia do wykonywania zapytań SQL
+#### Example: Adding SQL query execution tool
 ```python
-# Dodajesz do cli_assistant_fs.py nowe narzędzie:
+# Add to cli_assistant_fs.py new tool:
 
 def execute_sql(query: str, database: str) -> dict:
-    """Wykonuje zapytanie SQL na lokalnej bazie"""
+    """Executes SQL query on local database"""
     conn = sqlite3.connect(database)
     cursor = conn.cursor()
     cursor.execute(query)
@@ -433,70 +433,70 @@ def execute_sql(query: str, database: str) -> dict:
     conn.close()
     return {"results": results, "row_count": len(results)}
 
-# Rejestrujesz w TOOLS_SPEC
+# Register in TOOLS_SPEC
 ```
 
-Użycie:
+Usage:
 ```
-Ty> Znajdź wszystkich klientów którzy nie złożyli zamówienia od 6 miesięcy
+You> Find all customers who haven't placed an order in 6 months
 
-AI> Wykonuję zapytanie SQL na bazie customers.db...
+AI> Executing SQL query on customers.db database...
 SELECT c.* FROM customers c 
 LEFT JOIN orders o ON c.id = o.customer_id 
 WHERE o.created_at < date('now', '-6 months') 
 OR o.id IS NULL
 
-Znalazłem 342 nieaktywnych klientów.
-Generuję:
-- inactive_customers.csv - lista do kampanii email
-- reactivation_campaign.py - skrypt do automatycznej kampanii
-[Tworzy pliki na podstawie rzeczywistych danych z DB]
+Found 342 inactive customers.
+Generating:
+- inactive_customers.csv - list for email campaign
+- reactivation_campaign.py - script for automated campaign
+[Creates files based on actual DB data]
 ```
 
-#### Przykład: Integracja z lokalnym Docker
+#### Example: Local Docker integration
 ```python
-# Custom tool do zarządzania kontenerami:
+# Custom tool for container management:
 
 def docker_control(action: str, container: str) -> dict:
-    """Kontroluje lokalne kontenery Docker"""
+    """Controls local Docker containers"""
     import subprocess
     cmd = f"docker {action} {container}"
     result = subprocess.run(cmd, shell=True, capture_output=True)
     return {"output": result.stdout.decode(), "status": result.returncode}
 ```
 
-Użycie:
+Usage:
 ```
-Ty> Sprawdź logi kontenera z błędem i napraw konfigurację
+You> Check logs of the failing container and fix configuration
 
-AI> Sprawdzam status kontenerów Docker...
-3 kontenery działają, 1 zatrzymany (api-gateway).
+AI> Checking Docker container status...
+3 containers running, 1 stopped (api-gateway).
 
-Czytam logi api-gateway:
+Reading api-gateway logs:
 Error: Cannot connect to Redis at localhost:6379
 
-Analizuję docker-compose.yml...
-Problem: kontener api-gateway nie ma linku do redis.
+Analyzing docker-compose.yml...
+Problem: api-gateway container has no link to redis.
 
-Naprawiam docker-compose.yml:
-[Edytuje plik dodając depends_on i link do Redis]
+Fixing docker-compose.yml:
+[Edits file adding depends_on and link to Redis]
 
-Restartuję kontener...
-✅ Kontener api-gateway działa poprawnie!
+Restarting container...
+✅ Container api-gateway is working correctly!
 ```
 
-#### Przykład: Web scraping z lokalnym cache
+#### Example: Web scraping with local cache
 ```python
-# Custom tool z cache dla web scraping:
+# Custom tool with cache for web scraping:
 
 def scrape_with_cache(url: str, selector: str) -> dict:
-    """Scrapuje stronę z lokalnym cache"""
+    """Scrapes page with local cache"""
     cache_file = f"cache/{hashlib.md5(url.encode()).hexdigest()}.html"
     
     if os.path.exists(cache_file):
         with open(cache_file, 'r') as f:
             html = f.read()
-        print(f"Używam cache dla {url}")
+        print(f"Using cache for {url}")
     else:
         response = requests.get(url)
         html = response.text
@@ -507,100 +507,100 @@ def scrape_with_cache(url: str, selector: str) -> dict:
     return {"data": [el.text for el in soup.select(selector)]}
 ```
 
-Użycie:
+Usage:
 ```
-Ty> Monitoruj ceny 10 produktów z różnych sklepów i powiadom o zmianach
+You> Monitor prices of 10 products from different stores and notify about changes
 
-AI> Scrapuję ceny produktów...
-- allegro.pl/laptop-dell-xps - 4899 PLN (cache miss, pobieram)
-- x-kom.pl/laptop-gaming - 6299 PLN (używam cache)
+AI> Scraping product prices...
+- allegro.pl/laptop-dell-xps - 4899 PLN (cache miss, fetching)
+- x-kom.pl/laptop-gaming - 6299 PLN (using cache)
 ...
 
-Porównuję z cenami z ostatniego sprawdzenia (prices_history.json):
-📉 Spadek ceny: Dell XPS -200 PLN (-4%)
-📈 Wzrost ceny: Gaming Laptop +100 PLN (+1.6%)
+Comparing with prices from last check (prices_history.json):
+📉 Price drop: Dell XPS -200 PLN (-4%)
+📈 Price increase: Gaming Laptop +100 PLN (+1.6%)
 
-Aktualizuję prices_history.json
-Generuję raport: price_changes_2024-01-15.md
-[Tworzy szczegółowy raport ze zmianami i wykresami trendu]
+Updating prices_history.json
+Generating report: price_changes_2024-01-15.md
+[Creates detailed report with changes and trend charts]
 ```
 
-### 🔄 Pełna kontrola nad workflow
+### 🔄 Full Workflow Control
 
-#### Przykład: Kompleksowy deployment z testami
+#### Example: Complete deployment with tests
 ```
-Ty> Przygotuj pełny deployment - testy, build, sprawdzenie secretów, docker, backup
+You> Prepare full deployment - tests, build, secrets check, docker, backup
 
-AI> Rozpoczynam kompleksowy proces deployment...
+AI> Starting complete deployment process...
 
-1. Sprawdzam środowisko:
+1. Checking environment:
    - Python 3.11 ✅
    - Docker 24.0.7 ✅
    - PostgreSQL 15 ✅
 
-2. Weryfikuję secrety w .env.production:
-   - Wszystkie 23 zmienne ustawione ✅
-   - Sprawdzam czy klucze są różne od .env.development ✅
+2. Verifying secrets in .env.production:
+   - All 23 variables set ✅
+   - Checking if keys differ from .env.development ✅
 
-3. Uruchamiam testy:
+3. Running tests:
    - Unit tests: 156 passed ✅
    - Integration tests: 42 passed ✅
    - E2E tests: 18 passed ✅
 
-4. Tworzę backup bazy:
+4. Creating database backup:
    - Dump database: backup_2024_01_15_1430.sql (2.3GB) ✅
 
-5. Buduję Docker image:
+5. Building Docker image:
    - docker build -t myapp:v2.3.0 ✅
-   - Rozmiar: 387MB (zoptymalizowany multi-stage)
+   - Size: 387MB (optimized multi-stage)
 
-6. Sprawdzam logi z ostatniego deployment:
-   - Analizuję deployment_history.log
-   - Ostatni problem: memory spike podczas migracji
-   - Dodaję --max-memory flag do migracji
+6. Checking logs from last deployment:
+   - Analyzing deployment_history.log
+   - Last issue: memory spike during migration
+   - Adding --max-memory flag to migration
 
-7. Generuję deployment checklist:
-   [Tworzy deployment_checklist_v2.3.0.md z 35 punktami do sprawdzenia]
+7. Generating deployment checklist:
+   [Creates deployment_checklist_v2.3.0.md with 35 checkpoints]
 
-Wszystko gotowe do deployment! Uruchomić? (wymaga potwierdzenia)
+Everything ready for deployment! Proceed? (requires confirmation)
 ```
 
-## 🤝 Wkład w projekt
+## 🤝 Contributing
 
-1. Fork repozytorium
-2. Stwórz branch (`git checkout -b feature/AmazingFeature`)
-3. Commit zmian (`git commit -m 'Add AmazingFeature'`)
-4. Push do branch (`git push origin feature/AmazingFeature`)
-5. Otwórz Pull Request
+1. Fork the repository
+2. Create a branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-### Zasady contribuowania
+### Contributing guidelines
 
-- Zachowaj istniejący styl kodu
-- Dodaj testy dla nowych funkcji
-- Aktualizuj dokumentację
-- Przejdź audyt bezpieczeństwa dla zmian krytycznych
+- Maintain existing code style
+- Add tests for new features
+- Update documentation
+- Pass security audit for critical changes
 
-## 📝 Licencja
+## 📝 License
 
-[DO OKREŚLENIA - Sugerowana: MIT lub Apache 2.0]
+[TO BE DETERMINED - Suggested: MIT or Apache 2.0]
 
-## ⚠️ Zastrzeżenia
+## ⚠️ Disclaimers
 
-- Narzędzie przeznaczone do użytku w kontrolowanym środowisku
-- Nie używaj z niezaufanymi modelami AI
-- Regularnie twórz backupy ważnych danych
-- Monitoruj zużycie API i koszty
+- Tool intended for use in controlled environments
+- Do not use with untrusted AI models
+- Regularly backup important data
+- Monitor API usage and costs
 
-## 🙏 Podziękowania
+## 🙏 Acknowledgments
 
-- OpenAI za API i modele językowe
-- Społeczność Rich za bibliotekę formatowania CLI
-- Kontrybutorzy i testerzy
+- OpenAI for API and language models
+- Rich community for CLI formatting library
+- Contributors and testers
 
-## 📧 Kontakt
+## 📧 Contact
 
-Pytania i sugestie: damian@lobsterbrew.pl
+Questions and suggestions: damian@lobsterbrew.pl
 
 ---
 
-**Uwaga**: To narzędzie jest w aktywnym rozwoju. Używaj z rozwagą w środowiskach produkcyjnych.
+**Note**: This tool is in active development. Use with caution in production environments.
