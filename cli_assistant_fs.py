@@ -33,6 +33,14 @@ import re
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
 
+# Ładowanie zmiennych środowiskowych z .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv nie jest wymagane, ale przydatne
+    pass
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -44,6 +52,49 @@ except Exception:
     sys.exit(1)
 
 console = Console()
+
+# ── Lepsze obsługiwanie błędów ────────────────────────────────────────────────
+
+class GPTShellError(Exception):
+    """Bazowa klasa błędów aplikacji"""
+    def __init__(self, message: str, suggestion: str = None, error_code: str = None):
+        self.message = message
+        self.suggestion = suggestion
+        self.error_code = error_code
+        super().__init__(message)
+
+class ConfigurationError(GPTShellError):
+    """Błędy konfiguracji"""
+    pass
+
+class FileOperationError(GPTShellError):
+    """Błędy operacji na plikach"""
+    pass
+
+class APIError(GPTShellError):
+    """Błędy API OpenAI"""
+    pass
+
+def handle_error(error: Exception, context: str = ""):
+    """Obsługuje błędy z czytelnym komunikatem i sugestiami"""
+    if isinstance(error, GPTShellError):
+        console.print(f"[red]❌ {error.message}[/red]")
+        if error.suggestion:
+            console.print(f"[yellow]💡 Spróbuj: {error.suggestion}[/yellow]")
+        if error.error_code:
+            console.print(f"[dim]Kod błędu: {error.error_code}[/dim]")
+    else:
+        console.print(f"[red]❌ Nieoczekiwany błąd{' w ' + context if context else ''}: {str(error)}[/red]")
+        console.print("[yellow]💡 Spróbuj: Sprawdź logi lub uruchom z DEBUG=1[/yellow]")
+
+# ── Wersja aplikacji ──────────────────────────────────────────────────────────
+__version__ = "1.0.0"
+
+# Obsługa argumentu --version
+if "--version" in sys.argv:
+    console.print(f"[bold green]ChatGPT CLI FS Bridge[/bold green] v{__version__}")
+    console.print("🚀 Secure CLI interface for ChatGPT integration with local filesystem")
+    sys.exit(0)
 
 # ── Konfiguracja ───────────────────────────────────────────────────────────────
 
@@ -257,22 +308,83 @@ def list_tree(root: str = ".", max_depth: int = 3, include_files: bool = True) -
     _dbg("list_tree", root=str(base), entries=len(out))
     return {"root": str(base), "max_depth": max_depth, "entries": out}
 
+# ── Sprawdzanie rozmiaru plików ───────────────────────────────────────────────
+
+def check_file_size(filepath: pathlib.Path, max_size: int = 10*1024*1024) -> bool:
+    """Sprawdza rozmiar pliku i ostrzega przed dużymi plikami"""
+    if not filepath.exists():
+        return True
+        
+    size = filepath.stat().st_size
+    
+    if size > max_size:
+        size_mb = size / (1024 * 1024)
+        max_mb = max_size / (1024 * 1024)
+        
+        console.print(f"[yellow]⚠️  Duży plik: {filepath.name} ({size_mb:.1f}MB > {max_mb:.1f}MB)[/yellow]")
+        console.print(f"[dim]Pełna ścieżka: {filepath}[/dim]")
+        
+        # W trybie interaktywnym pytaj użytkownika
+        if sys.stdin.isatty():
+            response = input("Kontynuować odczyt? (y/N): ").lower().strip()
+            return response in ['y', 'yes', 'tak', 't']
+        else:
+            # W trybie nieinteraktywnym ostrzeż ale kontynuuj
+            console.print("[yellow]Tryb nieinteraktywny - kontynuuję odczyt[/yellow]")
+            return True
+    
+    return True
+
+def format_file_size(size_bytes: int) -> str:
+    """Formatuje rozmiar pliku w czytelny sposób"""
+    if size_bytes < 1024:
+        return f"{size_bytes}B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes/1024:.1f}KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes/(1024*1024):.1f}MB"
+    else:
+        return f"{size_bytes/(1024*1024*1024):.1f}GB"
+
 def read_file(path: str, max_bytes: int = None) -> Dict[str, Any]:
     p = within_workdir(pathlib.Path(path))
     if not p.exists():
         return {"error": f"Brak pliku: {p}"}
+    
+    # Sprawdź rozmiar pliku przed odczytem
+    if not check_file_size(p):
+        return {"error": f"Odczyt anulowany przez użytkownika: {p}"}
+    
     data = p.read_bytes()
+    original_size = len(data)
     clipped = False
     max_bytes = min(max_bytes or DEFAULT_MAX_BYTES, DEFAULT_MAX_BYTES)  # hard cap
+    
     if len(data) > max_bytes:
         data = data[:max_bytes]
         clipped = True
+        console.print(f"[yellow]⚠️  Plik obcięty z {format_file_size(original_size)} do {format_file_size(max_bytes)}[/yellow]")
+    
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         text = data.decode("utf-8", errors="replace")
-    _dbg("read_file", path=str(p), bytes=len(text), clipped=clipped)
-    return {"path": str(p), "content": text, "bytes": len(data), "clipped": clipped}
+        console.print("[yellow]⚠️  Plik zawiera znaki nie-UTF8, zastąpiono problematyczne znaki[/yellow]")
+    
+    _dbg("read_file", path=str(p), bytes=len(text), clipped=clipped, original_size=original_size)
+    
+    result = {
+        "path": str(p), 
+        "content": text, 
+        "bytes": len(data), 
+        "original_bytes": original_size,
+        "clipped": clipped
+    }
+    
+    if clipped:
+        result["clipped_info"] = f"Pokazano {len(data)} z {original_size} bajtów"
+    
+    return result
 
 def read_file_range(path: str, start: int = 0, size: int = None) -> Dict[str, Any]:
     p = within_workdir(pathlib.Path(path))
@@ -836,12 +948,98 @@ def chat_loop() -> None:
             _dbg("turn_complete", final_messages_count=len(messages))
             break
 
+# ── Walidacja konfiguracji ────────────────────────────────────────────────────
+
+def validate_config():
+    """Waliduje wszystkie wymagane zmienne środowiskowe i konfigurację"""
+    errors = []
+    warnings = []
+    
+    # Wymagane zmienne
+    required_vars = {
+        'OPENAI_API_KEY': 'Klucz API OpenAI (sk-...)'
+    }
+    
+    for var, description in required_vars.items():
+        value = os.environ.get(var)
+        if not value:
+            errors.append(ConfigurationError(
+                f"Brakuje {var} - {description}",
+                f"Ustaw {var} w pliku .env lub zmiennych środowiskowych",
+                "CONFIG_MISSING_VAR"
+            ))
+        elif var == 'OPENAI_API_KEY':
+            if not value.startswith('sk-'):
+                errors.append(ConfigurationError(
+                    f"{var} powinien zaczynać się od 'sk-'",
+                    "Sprawdź czy skopiowałeś pełny klucz z OpenAI Dashboard",
+                    "CONFIG_INVALID_API_KEY"
+                ))
+            elif len(value) < 20:
+                errors.append(ConfigurationError(
+                    f"{var} wydaje się za krótki",
+                    "Sprawdź czy skopiowałeś pełny klucz z OpenAI Dashboard",
+                    "CONFIG_SHORT_API_KEY"
+                ))
+    
+    # Opcjonalne zmienne z ostrzeżeniami
+    optional_vars = {
+        'OPENAI_MODEL': ('gpt-4', 'Model OpenAI'),
+        'WORKDIR': (os.getcwd(), 'Katalog roboczy'),
+        'MAX_BYTES_PER_READ': ('40000', 'Limit bajtów na odczyt pliku'),
+        'MAX_OUTPUT_TOKENS': ('1536', 'Limit tokenów odpowiedzi'),
+    }
+    
+    for var, (default, description) in optional_vars.items():
+        value = os.environ.get(var)
+        if not value:
+            warnings.append(f"⚠️  {var} nie ustawione, używam domyślnej wartości: {default}")
+    
+    # Sprawdzenie katalogu roboczego
+    workdir = os.environ.get('WORKDIR', os.getcwd())
+    if not os.path.exists(workdir):
+        errors.append(ConfigurationError(
+            f"WORKDIR nie istnieje: {workdir}",
+            f"Utwórz katalog: mkdir -p {workdir}",
+            "CONFIG_WORKDIR_NOT_EXISTS"
+        ))
+    elif not os.access(workdir, os.R_OK | os.W_OK):
+        errors.append(ConfigurationError(
+            f"Brak uprawnień do WORKDIR: {workdir}",
+            f"Zmień uprawnienia: chmod 755 {workdir}",
+            "CONFIG_WORKDIR_NO_PERMISSIONS"
+        ))
+    
+    # Wyświetlenie wyników
+    if errors:
+        console.print("[red]Błędy konfiguracji:[/red]")
+        for error in errors:
+            handle_error(error)
+        console.print("\n[yellow]Popraw konfigurację w pliku .env i uruchom ponownie.[/yellow]")
+        return False
+    
+    if warnings:
+        console.print("[yellow]Ostrzeżenia konfiguracji:[/yellow]")
+        for warning in warnings:
+            console.print(f"  {warning}")
+        console.print()
+    
+    console.print("✅ [green]Konfiguracja poprawna[/green]")
+    return True
+
 if __name__ == "__main__":
-    if not os.environ.get("OPENAI_API_KEY"):
-        console.print("[red]Brak zmiennej środowiskowej OPENAI_API_KEY.[/red] Ustaw ją i uruchom ponownie.")
-        sys.exit(2)
     try:
+        # Walidacja konfiguracji
+        if not validate_config():
+            sys.exit(2)
+            
         chat_loop()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]👋 Do widzenia![/yellow]")
+        sys.exit(0)
+    except GPTShellError as e:
+        handle_error(e, "główna pętla aplikacji")
+        sys.exit(2)
     except Exception as e:
-        console.print(f"[red]Błąd krytyczny:[/red] {e}")
+        handle_error(e, "główna pętla aplikacji")
         sys.exit(2)
