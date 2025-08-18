@@ -36,7 +36,10 @@ from typing import List, Dict, Any, Tuple
 # Ładowanie zmiennych środowiskowych z .env
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # Znajdź katalog ze skryptem (nie bieżący katalog roboczy)
+    script_dir = pathlib.Path(__file__).parent
+    env_file = script_dir / '.env'
+    load_dotenv(env_file)
 except ImportError:
     # dotenv nie jest wymagane, ale przydatne
     pass
@@ -162,7 +165,14 @@ if "--help" in sys.argv or "-h" in sys.argv:
 # ── Konfiguracja ───────────────────────────────────────────────────────────────
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5")
-WORKDIR = pathlib.Path(os.environ.get("WORKDIR", os.getcwd())).resolve()
+
+# WORKDIR powinno być katalogiem roboczym użytkownika, nie katalogiem skryptu
+# Jeśli WORKDIR nie jest ustawione w .env, użyj bieżącego katalogu roboczego
+if "WORKDIR" in os.environ:
+    WORKDIR = pathlib.Path(os.environ["WORKDIR"]).resolve()
+else:
+    # Użyj katalogu roboczego użytkownika (nie katalogu skryptu)
+    WORKDIR = pathlib.Path.cwd().resolve()
 
 USE_STREAM = os.environ.get("STREAM_PARTIAL", "0") == "1"
 REVIEW_PASS = os.environ.get("REVIEW_PASS", "1") == "1"

@@ -43,6 +43,9 @@ if [ ! -f "gpt-shell" ]; then
 #!/bin/bash
 # GPT Shell - Global Command Wrapper
 
+# Zapisz katalog roboczy użytkownika
+USER_WORKDIR="$(pwd)"
+
 # Znajdź prawdziwy katalog instalacji (obsługa symlinków)
 if [ -L "${BASH_SOURCE[0]}" ]; then
     # Jeśli to symlink, znajdź prawdziwy plik
@@ -58,8 +61,8 @@ if [ -d "$SCRIPT_DIR/venv" ]; then
     source "$SCRIPT_DIR/venv/bin/activate"
 fi
 
-# Uruchom aplikację z właściwego katalogu
-cd "$SCRIPT_DIR"
+# Uruchom aplikację z katalogu użytkownika, ale używając skryptu z katalogu instalacji
+cd "$USER_WORKDIR"
 exec python3 "$SCRIPT_DIR/cli_assistant_fs.py" "$@"
 EOF
     chmod +x gpt-shell
