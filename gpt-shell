@@ -1,0 +1,21 @@
+#!/bin/bash
+# GPT Shell - Global Command Wrapper
+
+# Znajdź prawdziwy katalog instalacji (obsługa symlinków)
+if [ -L "${BASH_SOURCE[0]}" ]; then
+    # Jeśli to symlink, znajdź prawdziwy plik
+    REAL_SCRIPT="$(readlink "${BASH_SOURCE[0]}")"
+    SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+else
+    # Jeśli to prawdziwy plik
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+# Aktywuj virtual environment jeśli istnieje
+if [ -d "$SCRIPT_DIR/venv" ]; then
+    source "$SCRIPT_DIR/venv/bin/activate"
+fi
+
+# Uruchom aplikację z właściwego katalogu
+cd "$SCRIPT_DIR"
+exec python3 "$SCRIPT_DIR/cli_assistant_fs.py" "$@"

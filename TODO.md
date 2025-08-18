@@ -72,7 +72,8 @@
 - [ ] **Logging levels** - DEBUG, INFO, WARNING, ERROR
 - [ ] **Config file support** - config.yaml oprócz .env
 - [x] **Version command** - `--version` flag ✅
-- [ ] **Help improvements** - lepsze opisy w --help
+- [x] **Help improvements** - lepsze opisy w --help ✅
+- [x] **Global command** - instalacja jako globalne polecenie ✅
 
 ### Można zrobić w 1-2h każda:
 - [x] **File size warnings** - ostrzeżenia przed dużymi plikami ✅

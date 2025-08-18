@@ -30,11 +30,28 @@ ChatGPT CLI FS Bridge is a tool that allows ChatGPT and other OpenAI language mo
 - OpenAI API key
 - macOS or Linux (Windows with WSL)
 
-### Installation
+### Global Installation (Recommended)
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/gpt-shell.git
+git clone https://github.com/flatplanetpl/gpt-shell.git
+cd gpt-shell
+
+# Run automatic installation
+./install.sh
+
+# Configure your API key
+nano .env  # Add your OPENAI_API_KEY
+
+# Use globally from anywhere
+gpt-shell
+```
+
+### Manual Installation
+
+```bash
+# Clone repository
+git clone https://github.com/flatplanetpl/gpt-shell.git
 cd gpt-shell
 
 # Automatic setup
@@ -44,11 +61,11 @@ cd gpt-shell
 cp .env.example .env
 nano .env  # Add your OPENAI_API_KEY
 
-# Run
+# Run locally
 ./run.sh
 ```
 
-### Manual configuration
+### Alternative: Manual configuration
 
 ```bash
 # Create virtual environment
@@ -61,6 +78,28 @@ pip install -r requirements.txt
 
 # Run
 python cli_assistant_fs.py
+```
+
+## 🎯 Usage
+
+### Global Command (after installation)
+
+```bash
+# Start interactive chat
+gpt-shell
+
+# Show version
+gpt-shell --version
+
+# Show help
+gpt-shell --help
+```
+
+### Uninstallation
+
+```bash
+# From the project directory
+./uninstall.sh
 ```
 
 ## ⚙️ Configuration
