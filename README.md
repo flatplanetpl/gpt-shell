@@ -16,11 +16,13 @@ ChatGPT CLI FS Bridge is a tool that allows ChatGPT and other OpenAI language mo
 
 - 🔒 **Security sandbox** - all operations limited to defined working directory
 - 🚀 **6 secure filesystem tools** - list_dir, read_file, write_file, search_text and more
+- 🧠 **Advanced Context Memory** - persistent conversation history across sessions
 - 🔄 **Intelligent error handling** - automatic retry with exponential backoff for rate limits
 - 📊 **Cost tracking** - token counter and real-time cost estimation
 - 🎨 **Rich CLI interface** - Markdown formatting, panels, syntax highlighting
 - 🔍 **Debug mode** - detailed logs with sensitive data redaction option
 - 💾 **Automatic backups** - every file modification creates a backup copy
+- 🔍 **RAG system** - Retrieval Augmented Generation with local embeddings
 
 ## 🚀 Quick Start
 
@@ -141,6 +143,46 @@ OPENAI_OUTPUT_PRICE_PER_M=15.0 # Output token price for ChatGPT
   "constraints": "Constraints for ChatGPT operations..."
 }
 ```
+
+## 🧠 Context Memory System
+
+**GPT Shell remembers your conversations across sessions!**
+
+### 🎯 **What it does:**
+- **Persistent memory** - conversations survive app restarts
+- **Intelligent context** - loads relevant history automatically  
+- **Smart summarization** - compresses old conversations to save tokens
+- **Project-specific** - separate memory for each project directory
+- **Cost tracking** - monitors token usage and costs over time
+
+### 📊 **Memory Commands:**
+```bash
+/stats              # Show conversation statistics
+/summary            # Create summary of recent activity
+/summary last_week  # Weekly summary
+/cleanup            # Remove old conversations (keeps summaries)
+```
+
+### 🔄 **How it works:**
+1. **Start GPT Shell** - automatically loads recent context
+2. **Have conversations** - everything saved to local database
+3. **Exit and restart** - your context is remembered!
+4. **Long-term projects** - maintains context across weeks/months
+
+**Example:**
+```bash
+# Session 1
+Ty> Create a user authentication system
+GPT> I'll create auth.py with JWT tokens...
+
+# Exit and restart later...
+
+# Session 2  
+Ty> Add password reset functionality
+GPT> I remember we created JWT auth in auth.py. I'll add password reset...
+```
+
+**[📖 Full Context Memory Documentation](CONTEXT_MEMORY.md)**
 
 ## 📚 Available Tools
 

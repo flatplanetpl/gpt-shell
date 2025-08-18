@@ -33,6 +33,14 @@ import re
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
 
+# Context Memory System
+try:
+    from context_memory import ContextMemoryManager, ConversationTurn
+    CONTEXT_MEMORY_AVAILABLE = True
+except ImportError:
+    CONTEXT_MEMORY_AVAILABLE = False
+    print("⚠️  Context Memory system not available (context_memory.py missing)")
+
 # Ładowanie zmiennych środowiskowych z .env
 try:
     from dotenv import load_dotenv
@@ -79,6 +87,107 @@ def show_spinner_progress(description: str):
         console=console,
         transient=True  # Ukryj po zakończeniu
     )
+
+# ── Context Memory Functions ─────────────────────────────────────────────────
+
+def get_enhanced_context(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Get enhanced context with persistent memory"""
+    if not CONTEXT_MEMORY_ENABLED:
+        return messages
+    
+    try:
+        # Get recent context from persistent storage
+        recent_context = context_memory.get_recent_context(str(WORKDIR), max_tokens=2000)
+        
+        if recent_context:
+            # Insert recent context after system message but before current conversation
+            system_msgs = [m for m in messages if m.get("role") == "system"]
+            other_msgs = [m for m in messages if m.get("role") != "system"]
+            
+            # Add context separator
+            context_separator = {
+                "role": "system", 
+                "content": "=== RECENT CONVERSATION CONTEXT ===\nHere's what we discussed recently in this project:"
+            }
+            
+            enhanced = system_msgs + [context_separator] + recent_context + other_msgs
+            _dbg("enhanced_context", added_messages=len(recent_context))
+            return enhanced
+        
+    except Exception as e:
+        _dbg("context_memory_error", error=str(e))
+    
+    return messages
+
+def save_conversation_turn(user_message: str, assistant_message: str, tool_calls: List = None, 
+                          tokens_used: int = 0, cost: float = 0.0, session_id: str = ""):
+    """Save conversation turn to persistent memory"""
+    if not CONTEXT_MEMORY_ENABLED:
+        return
+    
+    try:
+        turn = ConversationTurn(
+            timestamp=datetime.now().isoformat(),
+            user_message=user_message,
+            assistant_message=assistant_message,
+            tool_calls=tool_calls or [],
+            tokens_used=tokens_used,
+            cost=cost,
+            project_path=str(WORKDIR),
+            session_id=session_id
+        )
+        
+        context_memory.save_conversation_turn(turn)
+        _dbg("conversation_saved", session_id=session_id, tokens=tokens_used)
+        
+    except Exception as e:
+        _dbg("save_conversation_error", error=str(e))
+
+def show_context_stats():
+    """Show context memory statistics"""
+    if not CONTEXT_MEMORY_ENABLED:
+        console.print("[yellow]Context Memory not available[/yellow]")
+        return
+    
+    try:
+        stats = context_memory.get_project_stats(str(WORKDIR))
+        
+        console.print(Panel.fit(
+            f"📊 Context Memory Stats\n"
+            f"Total conversations: {stats['total_turns']}\n"
+            f"Total tokens used: {stats['total_tokens']:,}\n"
+            f"Total cost: ${stats['total_cost']:.4f}\n"
+            f"Sessions: {stats['total_sessions']}\n"
+            f"First conversation: {stats['first_conversation'] or 'None'}\n"
+            f"Last conversation: {stats['last_conversation'] or 'None'}",
+            title="Context Memory"
+        ))
+        
+    except Exception as e:
+        console.print(f"[red]Error getting context stats: {e}[/red]")
+
+def create_context_summary(period: str = "last_day"):
+    """Create and show context summary"""
+    if not CONTEXT_MEMORY_ENABLED:
+        console.print("[yellow]Context Memory not available[/yellow]")
+        return
+    
+    try:
+        with show_spinner_progress(f"📝 Creating {period} summary...") as progress:
+            progress.add_task("Analyzing...", total=None)
+            summary = context_memory.create_summary(str(WORKDIR), period)
+        
+        console.print(Panel.fit(
+            f"📝 Context Summary ({period})\n\n"
+            f"{summary.summary}\n\n"
+            f"Key topics: {', '.join(summary.key_topics)}\n"
+            f"Files created: {len(summary.created_files)}\n"
+            f"Tokens saved: {summary.tokens_saved:,}",
+            title=f"Summary - {period}"
+        ))
+        
+    except Exception as e:
+        console.print(f"[red]Error creating summary: {e}[/red]")
 
 # ── Lepsze obsługiwanie błędów ────────────────────────────────────────────────
 
@@ -200,6 +309,14 @@ DATA_DIR = (WORKDIR / ".gpt-shell").resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 EMBED_DB = DATA_DIR / "embeddings.db"
 
+# Initialize Context Memory Manager
+if CONTEXT_MEMORY_AVAILABLE:
+    context_memory = ContextMemoryManager(WORKDIR)
+    CONTEXT_MEMORY_ENABLED = True
+else:
+    context_memory = None
+    CONTEXT_MEMORY_ENABLED = False
+
 # Shell (off domyślnie)
 ALLOW_SHELL = os.environ.get("ALLOW_SHELL", "0") == "1"
 DEFAULT_CMD_TIMEOUT = int(os.environ.get("CMD_TIMEOUT", "30"))
@@ -260,6 +377,16 @@ def _cost_for_call(p, c):
     if PRICE_IN is None or PRICE_OUT is None:
         return None
     return (p/1_000_000.0)*PRICE_IN + (c/1_000_000.0)*PRICE_OUT
+
+def calculate_cost(usage) -> float:
+    """Calculate cost from OpenAI usage object"""
+    if not usage:
+        return 0.0
+    
+    prompt_tokens = getattr(usage, 'prompt_tokens', 0)
+    completion_tokens = getattr(usage, 'completion_tokens', 0)
+    
+    return _cost_for_call(prompt_tokens, completion_tokens) or 0.0
 
 def _update_usage(turn_acc: Dict[str, int], usage) -> None:
     if not usage:
@@ -1065,15 +1192,35 @@ def _format_context_snippets(snips: List[Dict[str, Any]]) -> str:
 
 def chat_loop() -> None:
     _dbg("app_start", workdir=str(WORKDIR), model=MODEL, debug=DEBUG)
-    console.print(Panel.fit(f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold] | DEBUG: [bold]{int(DEBUG)}[/bold]\nRAG: [bold]{'ON' if RAG_ENABLE else 'OFF'}[/bold] | DB: [bold]{EMBED_DB}[/bold]", title="CLI FS Bridge + RAG"))
+    
+    # Enhanced panel with context memory info
+    memory_status = "ON" if CONTEXT_MEMORY_ENABLED else "OFF"
+    console.print(Panel.fit(
+        f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold] | DEBUG: [bold]{int(DEBUG)}[/bold]\n"
+        f"RAG: [bold]{'ON' if RAG_ENABLE else 'OFF'}[/bold] | MEMORY: [bold]{memory_status}[/bold] | DB: [bold]{EMBED_DB}[/bold]", 
+        title="CLI FS Bridge + RAG + Memory"
+    ))
+
+    # Start context memory session
+    session_id = ""
+    if CONTEXT_MEMORY_ENABLED:
+        session_id = context_memory.start_session(str(WORKDIR))
+        _dbg("context_session_started", session_id=session_id)
 
     ctx = ensure_context_file()
     _dbg("context_loaded", context=ctx)
     sys_prompt = build_system_prompt(ctx)
     messages: List[Dict[str, Any]] = [{"role": "system", "content": sys_prompt}]
-    _dbg("initial_messages", messages=messages)
+    
+    # Load recent context from memory
+    if CONTEXT_MEMORY_ENABLED:
+        messages = get_enhanced_context(messages)
+    
+    _dbg("initial_messages", messages=len(messages))
 
     console.print("[dim]Komendy specjalne: /init (zbuduj/odśwież indeks embeddingów w .gpt-shell)[/dim]")
+    if CONTEXT_MEMORY_ENABLED:
+        console.print("[dim]Komendy pamięci: /stats (statystyki), /summary (podsumowanie), /cleanup (czyszczenie)[/dim]")
 
     while True:
         try:
@@ -1101,7 +1248,28 @@ def chat_loop() -> None:
                 console.print(f"[red]Błąd indeksowania:[/red] {e}")
             continue
 
+        # Context Memory Commands
+        if CONTEXT_MEMORY_ENABLED:
+            if user_in.strip() == "/stats":
+                show_context_stats()
+                continue
+            
+            if user_in.strip().startswith("/summary"):
+                parts = user_in.strip().split()
+                period = parts[1] if len(parts) > 1 else "last_day"
+                create_context_summary(period)
+                continue
+            
+            if user_in.strip() == "/cleanup":
+                try:
+                    deleted = context_memory.cleanup_old_conversations(days_to_keep=30)
+                    console.print(f"[green]Usunięto {deleted} starych konwersacji[/green]")
+                except Exception as e:
+                    console.print(f"[red]Błąd czyszczenia: {e}[/red]")
+                continue
+
         # Normalny czat + ewentualny RAG
+        original_user_message = user_in  # Save for context memory
         messages.append({"role": "user", "content": user_in})
         _dbg("messages_after_user", count=len(messages))
 
@@ -1158,8 +1326,48 @@ def chat_loop() -> None:
                 _dbg("final_response_non_stream", content=final_text)
                 console.print(Markdown(final_text))
                 _print_turn_summary(turn_acc)
+            
+            # Save conversation turn to context memory
+            if CONTEXT_MEMORY_ENABLED:
+                try:
+                    # Extract tool calls if any
+                    tool_calls_for_memory = []
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        tool_calls_for_memory = [
+                            {
+                                'function': {
+                                    'name': tc.function.name,
+                                    'arguments': tc.function.arguments
+                                }
+                            } for tc in msg.tool_calls
+                        ]
+                    
+                    # Calculate cost
+                    usage = getattr(resp, "usage", None) if 'resp' in locals() else None
+                    tokens_used = usage.total_tokens if usage else 0
+                    cost = calculate_cost(usage) if usage else 0.0
+                    
+                    save_conversation_turn(
+                        user_message=original_user_message,
+                        assistant_message=final_text,
+                        tool_calls=tool_calls_for_memory,
+                        tokens_used=tokens_used,
+                        cost=cost,
+                        session_id=session_id
+                    )
+                except Exception as e:
+                    _dbg("save_conversation_error", error=str(e))
+            
             _dbg("turn_complete", final_messages_count=len(messages))
             break
+
+    # End context memory session
+    if CONTEXT_MEMORY_ENABLED and session_id:
+        try:
+            context_memory.end_session(session_id)
+            _dbg("context_session_ended", session_id=session_id)
+        except Exception as e:
+            _dbg("end_session_error", error=str(e))
 
 # ── Walidacja konfiguracji ────────────────────────────────────────────────────
 
