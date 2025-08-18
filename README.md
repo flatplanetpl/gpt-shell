@@ -1,16 +1,16 @@
-# CLI FS Bridge
+# ChatGPT CLI FS Bridge
 
-**Secure CLI interface for AI model integration with local filesystem**
+**Secure CLI interface for ChatGPT integration with local filesystem**
 
-CLI FS Bridge is a tool that allows language models (LLMs) to safely interact with the filesystem through a controlled API. The application creates a sandboxed environment where AI can read, write, and search files while maintaining full security control.
+ChatGPT CLI FS Bridge is a tool that allows ChatGPT and other OpenAI language models to safely interact with your local filesystem through a controlled API. The application creates a sandboxed environment where ChatGPT can read, write, and search files while maintaining full security control.
 
 ## 🎯 Main Use Cases
 
-- **Programming task automation** - AI can analyze code, generate files, refactor
-- **Document processing** - bulk operations on text files with intelligent analysis
-- **Developer assistant** - interactive help with debugging and project development
-- **Code analysis** - searching and analyzing large codebases
-- **Report generation** - automatic documentation creation based on project structure
+- **Programming task automation** - ChatGPT can analyze code, generate files, refactor
+- **Document processing** - bulk operations on text files with ChatGPT's intelligent analysis
+- **Developer assistant** - interactive help with debugging and project development using ChatGPT
+- **Code analysis** - searching and analyzing large codebases with ChatGPT's understanding
+- **Report generation** - automatic documentation creation based on project structure using ChatGPT
 
 ## ✨ Key Features
 
@@ -68,11 +68,11 @@ python cli_assistant_fs.py
 ### Environment variables (.env)
 
 ```bash
-# Required
-OPENAI_API_KEY=sk-...          # Your API key
+# Required - OpenAI API Key for ChatGPT
+OPENAI_API_KEY=sk-...          # Your OpenAI API key
 
-# AI Model
-OPENAI_MODEL=gpt-4             # Default: gpt-5
+# ChatGPT Model Selection
+OPENAI_MODEL=gpt-4             # ChatGPT model (gpt-4, gpt-3.5-turbo, etc.)
 
 # Security
 WORKDIR=/path/to/safe/dir      # Working directory (default: current)
@@ -80,26 +80,26 @@ ALLOW_SHELL=0                   # Shell command execution (0=disabled)
 
 # Limits
 MAX_BYTES_PER_READ=40000       # Max bytes per file read
-MAX_OUTPUT_TOKENS=1536         # Max response tokens
-MAX_HISTORY_MSGS=16            # Max messages in history
+MAX_OUTPUT_TOKENS=1536         # Max ChatGPT response tokens
+MAX_HISTORY_MSGS=16            # Max messages in ChatGPT conversation history
 
 # Debug
 DEBUG=0                        # Debug mode (0/1)
 DEBUG_FORMAT=text              # Log format (text/json)
 DEBUG_REDACT=0                 # Sensitive data redaction (0/1)
 
-# Costs (USD per 1M tokens)
-OPENAI_INPUT_PRICE_PER_M=5.0   # Input token price
-OPENAI_OUTPUT_PRICE_PER_M=15.0 # Output token price
+# OpenAI Costs (USD per 1M tokens)
+OPENAI_INPUT_PRICE_PER_M=5.0   # Input token price for ChatGPT
+OPENAI_OUTPUT_PRICE_PER_M=15.0 # Output token price for ChatGPT
 ```
 
-### Project context (clifs.context.json)
+### Project context for ChatGPT (clifs.context.json)
 
 ```json
 {
-  "instructions": "Additional instructions for AI...",
-  "project_goals": "Project goals...",
-  "constraints": "Constraints..."
+  "instructions": "Additional instructions for ChatGPT...",
+  "project_goals": "Project goals for ChatGPT to understand...",
+  "constraints": "Constraints for ChatGPT operations..."
 }
 ```
 
@@ -150,7 +150,7 @@ DEBUG=1 DEBUG_REDACT=1 ./run.sh
 ```
 You> Search the project for potential security vulnerabilities like SQL injection or XSS
 
-AI> Analyzing files for security issues...
+ChatGPT> Analyzing files for security issues...
 Found 3 potential problems:
 1. views.py:45 - Unprotected SQL query with user input
 2. templates/form.html:12 - Missing user data escaping
@@ -162,7 +162,7 @@ Found 3 potential problems:
 ```
 You> Find the most complex functions in the project and suggest refactoring
 
-AI> Analyzing cyclomatic complexity...
+ChatGPT> Analyzing cyclomatic complexity...
 Top 3 most complex functions:
 1. process_payment() - complexity: 15 (utils/payment.py:234)
 2. validate_order() - complexity: 12 (models/order.py:567) 
@@ -176,7 +176,7 @@ Top 3 most complex functions:
 ```
 You> Write unit tests for the UserService class in services/user.py
 
-AI> Analyzing UserService class...
+ChatGPT> Analyzing UserService class...
 Creating tests/test_user_service.py with 15 tests covering:
 - User creation
 - Email validation
@@ -189,7 +189,7 @@ Creating tests/test_user_service.py with 15 tests covering:
 ```
 You> Create REST API for Product model with full CRUD
 
-AI> Creating Product API endpoints...
+ChatGPT> Creating Product API endpoints...
 Generating:
 - routes/product.py - GET/POST/PUT/DELETE endpoints
 - schemas/product.py - Pydantic validation
@@ -203,7 +203,7 @@ Generating:
 ```
 You> Convert all .js files in components/ directory to TypeScript
 
-AI> Starting TypeScript migration...
+ChatGPT> Starting TypeScript migration...
 Found 12 JavaScript files.
 Converting:
 - Button.js → Button.tsx (adding prop types)
@@ -216,7 +216,7 @@ Converting:
 ```
 You> Update Python 2 code to Python 3 throughout the project
 
-AI> Scanning for Python 2 syntax...
+ChatGPT> Scanning for Python 2 syntax...
 Found outdated elements:
 - 8x print statements → print()
 - 3x .iteritems() → .items()
@@ -231,7 +231,7 @@ Found outdated elements:
 ```
 You> Generate Markdown documentation for all classes in core/ module
 
-AI> Analyzing core/ module...
+ChatGPT> Analyzing core/ module...
 Found 8 classes, 42 public methods.
 Generating docs/core-api.md:
 # Core Module API
@@ -246,7 +246,7 @@ Generating docs/core-api.md:
 ```
 You> Check which packages in requirements.txt are unused
 
-AI> Analyzing imports in project...
+ChatGPT> Analyzing imports in project...
 Unused packages:
 - pandas==1.3.0 (no imports found)
 - requests-mock==1.9.3 (only in commented code)
@@ -260,7 +260,7 @@ Suggest removing or updating requirements.txt
 ```
 You> Analyze error.log and find the most common errors
 
-AI> Analyzing error.log file (2.3MB, 15432 lines)...
+ChatGPT> Analyzing error.log file (2.3MB, 15432 lines)...
 Top 5 errors:
 1. ConnectionTimeout (1823 occurrences) - mainly between 14:00-15:00
 2. KeyError 'user_id' (456 occurrences) - endpoint /api/profile
@@ -274,7 +274,7 @@ Top 5 errors:
 ```
 You> Check for memory leaks in Python files
 
-AI> Scanning code for potential leaks...
+ChatGPT> Scanning code for potential leaks...
 Found problematic patterns:
 1. data_processor.py:78 - Unclosed file handler
 2. cache_manager.py:234 - Circular reference in cache
@@ -288,7 +288,7 @@ Found problematic patterns:
 ```
 You> Rename all test_*.py files to *_test.py in the project
 
-AI> Searching for test_*.py files...
+ChatGPT> Searching for test_*.py files...
 Found 23 files to rename:
 - test_auth.py → auth_test.py
 - test_database.py → database_test.py
@@ -300,7 +300,7 @@ Found 23 files to rename:
 ```
 You> Remove all commented code blocks and console.log from the project
 
-AI> Scanning files for dead code...
+ChatGPT> Scanning files for dead code...
 Found:
 - 67 commented code blocks
 - 23 console.log calls
@@ -315,7 +315,7 @@ Creating backup before cleanup...
 ```
 You> Check for N+1 query problems in Django models
 
-AI> Analyzing models and views...
+ChatGPT> Analyzing models and views...
 Potential N+1 problems:
 1. views.py:89 - Post.objects.all() without select_related('author')
 2. serializers.py:45 - Iteration over comments without prefetch
@@ -327,7 +327,7 @@ Potential N+1 problems:
 ```
 You> Optimize imports - remove unused and sort
 
-AI> Analyzing imports in 45 Python files...
+ChatGPT> Analyzing imports in 45 Python files...
 Removing 89 unused imports:
 - 23x 'from typing import Optional' (unused)
 - 15x 'import json' (unused)
@@ -342,7 +342,7 @@ Sorting according to PEP8 convention...
 ```
 You> I have an openapi.yaml file - generate a Python client
 
-AI> Parsing OpenAPI specification...
+ChatGPT> Parsing OpenAPI specification...
 Found 12 endpoints, generating:
 - client/api.py - main APIClient class
 - client/models.py - 8 Pydantic models
@@ -355,7 +355,7 @@ Found 12 endpoints, generating:
 ```
 You> Add webhook support for user.created and order.completed events
 
-AI> Creating webhook system...
+ChatGPT> Creating webhook system...
 Generating:
 - webhooks/handlers.py - event handlers
 - webhooks/models.py - WebhookSubscription model
@@ -374,7 +374,7 @@ Unlike GitHub Copilot, which only works within the editor context, CLI FS Bridge
 ```
 You> I have production logs in ~/logs/prod-2024-12-15.log (200MB) - find all 500 errors and create statistics
 
-AI> Reading file ~/logs/prod-2024-12-15.log...
+ChatGPT> Reading file ~/logs/prod-2024-12-15.log...
 Analyzing 1,245,332 log lines...
 
 Found 3,421 HTTP 500 errors:
@@ -391,7 +391,7 @@ Generating detailed report: error_analysis_2024-12-15.md
 ```
 You> Connect to my local SQLite database in ~/data/customers.db and generate Pydantic models
 
-AI> Connecting to ~/data/customers.db...
+ChatGPT> Connecting to ~/data/customers.db...
 Found 8 tables:
 - customers (15 columns)
 - orders (12 columns)
@@ -406,7 +406,7 @@ Generating models/database.py with Pydantic models:
 ```
 You> Check all .env files in ~/projects/ and find duplicate API keys
 
-AI> Scanning ~/projects/ directory for .env files...
+ChatGPT> Scanning ~/projects/ directory for .env files...
 Found 12 .env files in different projects.
 
 Duplicate API keys:
@@ -440,7 +440,7 @@ Usage:
 ```
 You> Find all customers who haven't placed an order in 6 months
 
-AI> Executing SQL query on customers.db database...
+ChatGPT> Executing SQL query on customers.db database...
 SELECT c.* FROM customers c 
 LEFT JOIN orders o ON c.id = o.customer_id 
 WHERE o.created_at < date('now', '-6 months') 
@@ -469,7 +469,7 @@ Usage:
 ```
 You> Check logs of the failing container and fix configuration
 
-AI> Checking Docker container status...
+ChatGPT> Checking Docker container status...
 3 containers running, 1 stopped (api-gateway).
 
 Reading api-gateway logs:
@@ -511,7 +511,7 @@ Usage:
 ```
 You> Monitor prices of 10 products from different stores and notify about changes
 
-AI> Scraping product prices...
+ChatGPT> Scraping product prices...
 - allegro.pl/laptop-dell-xps - 4899 PLN (cache miss, fetching)
 - x-kom.pl/laptop-gaming - 6299 PLN (using cache)
 ...
@@ -531,7 +531,7 @@ Generating report: price_changes_2024-01-15.md
 ```
 You> Prepare full deployment - tests, build, secrets check, docker, backup
 
-AI> Starting complete deployment process...
+ChatGPT> Starting complete deployment process...
 
 1. Checking environment:
    - Python 3.11 ✅

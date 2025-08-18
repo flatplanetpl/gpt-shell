@@ -8,7 +8,9 @@ Co potrafi:
 - Fallback limitów: max_completion_tokens → max_tokens.
 - Licznik tokenów i kosztów po KAŻDEJ turze (cennik z .env).
 - DEBUG logi + redakcja (DEBUG_REDACT=1).
-- Stream fallback: jeśli org niezweryfikowana do streamingu, przełącza na non‑stream.
+- Stream fallback: jeśli org niezweryfikowana do streamingu, przełącza na non-stream.
+- [NOWE] RAG z embeddingami: /init indeksuje repo do SQLite w .gpt-shell, a przy każdym pytaniu do modelu
+  dołączany jest lokalny kontekst z najbardziej podobnych fragmentów.
 
 Szybki start:
     python3 -m venv venv
@@ -25,9 +27,11 @@ import time
 import random
 import shutil
 import pathlib
+import hashlib
+import sqlite3
 import re
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -58,26 +62,31 @@ DEFAULT_MAX_BYTES = int(os.environ.get("MAX_BYTES_PER_READ", "40000"))
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "1536"))
 MAX_HISTORY_MSGS = int(os.environ.get("MAX_HISTORY_MSGS", "16"))
 
-# Cennik: USD per 1M tokens
-def _read_price(name: str):
-    v = os.environ.get(name)
-    try:
-        return float(v) if v else None
-    except Exception:
-        return None
+# Embeddingi / RAG
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "text-embedding-3-small")
+RAG_ENABLE = os.environ.get("RAG_ENABLE", "1") == "1"
+RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "8"))
+RAG_MAX_CHUNK_CHARS = int(os.environ.get("RAG_MAX_CHUNK_CHARS", "900"))
+CHUNK_SIZE = int(os.environ.get("RAG_CHUNK_SIZE", "1500"))
+CHUNK_OVERLAP = int(os.environ.get("RAG_CHUNK_OVERLAP", "200"))
+EMBED_BATCH = int(os.environ.get("EMBED_BATCH", "96"))
+EMBED_MAX_FILE_BYTES = int(os.environ.get("EMBED_MAX_FILE_BYTES", "2000000"))
 
-PRICE_IN  = _read_price("OPENAI_INPUT_PRICE_PER_M")   # np. 5.0
-PRICE_OUT = _read_price("OPENAI_OUTPUT_PRICE_PER_M")  # np. 15.0
-SESSION_ACC = {"p": 0, "c": 0, "cost": 0.0}
-
-CONTEXT_PATH = os.environ.get("CLIFS_CONTEXT") or str(WORKDIR / "clifs.context.json")
+DATA_DIR = (WORKDIR / ".gpt-shell").resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+EMBED_DB = DATA_DIR / "embeddings.db"
 
 # Shell (off domyślnie)
 ALLOW_SHELL = os.environ.get("ALLOW_SHELL", "0") == "1"
 DEFAULT_CMD_TIMEOUT = int(os.environ.get("CMD_TIMEOUT", "30"))
-IGNORE_GLOBS = [s.strip() for s in os.environ.get("IGNORE_GLOBS", ".git,node_modules,dist,build,__pycache__,.venv,venv").split(",") if s.strip()]
 
-client = OpenAI()
+IGNORE_GLOBS = [s.strip() for s in os.environ.get("IGNORE_GLOBS", ".git,node_modules,dist,build,__pycache__,.venv,venv,.gpt-shell").split(",") if s.strip()]
+
+try:
+    client = OpenAI()
+except Exception as e:
+    print(f"[ERROR] Nie można zainicjalizować klienta OpenAI: {e}", file=sys.stderr)
+    sys.exit(1)
 
 # ── Debug helper ───────────────────────────────────────────────────────────────
 
@@ -95,16 +104,14 @@ def _dbg(event: str, **fields):
             return s[:200] + ("…" if len(s) > 200 else "")
         except Exception:
             return str(v)[:200]
-    
+
     if DEBUG_FORMAT == "json":
         out = {"ts": datetime.now().isoformat(timespec="seconds"), "event": event}
         out.update({k: _pv(v) for k, v in fields.items()})
         log_line = json.dumps(out, ensure_ascii=False)
     else:
-        log_line = " ".join([f"[{event}]"] + [f"{k}={_pv(v)}" for k, v in fields.items()])
-    
+        log_line = " ".join([f"[{event}]", *[f"{k}={_pv(v)}" for k, v in fields.items()]])
     print(log_line)
-    
     if DEBUG_FILE:
         try:
             with open(DEBUG_FILE, "a", encoding="utf-8") as f:
@@ -113,6 +120,17 @@ def _dbg(event: str, **fields):
             print(f"[DEBUG_FILE_ERROR] Nie można zapisać do {DEBUG_FILE}: {e}")
 
 # ── Koszty i usage ─────────────────────────────────────────────────────────────
+
+def _read_price(name: str):
+    v = os.environ.get(name)
+    try:
+        return float(v) if v else None
+    except Exception:
+        return None
+
+PRICE_IN  = _read_price("OPENAI_INPUT_PRICE_PER_M")   # np. 5.0
+PRICE_OUT = _read_price("OPENAI_OUTPUT_PRICE_PER_M")  # np. 15.0
+SESSION_ACC = {"p": 0, "c": 0, "cost": 0.0}
 
 def _cost_for_call(p, c):
     if PRICE_IN is None or PRICE_OUT is None:
@@ -320,7 +338,7 @@ TOOLS_SPEC = [
     {"type":"function","function":{"name":"read_file_range","description":"Czytaj fragment pliku: start+size.","parameters":{"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer"},"size":{"type":"integer"}},"required":["path"]}}},
     {"type":"function","function":{"name":"write_file","description":"Zapisz cały plik (UTF-8).","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"create_dirs":{"type":"boolean"}},"required":["path","content"]}}},
     {"type":"function","function":{"name":"list_tree","description":"Zwróć drzewo katalogów.","parameters":{"type":"object","properties":{"root":{"type":"string"},"max_depth":{"type":"integer","minimum":0,"maximum":20},"include_files":{"type":"boolean"}},"required":[]}}},
-    {"type":"function","function":{"name":"search_text","description":"Szukaj wzorca w plikach.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"regex":{"type":"boolean"},"max_results":{"type":"integer","minimum":1}},"required":["pattern"]}}},
+    {"type":"function","function":{"name":"search_text","description":"Szukaj wzorca w plikach.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"regex":{"type":"boolean"},"max_results":{"type":"integer","minimum":1}},"required":["pattern"]}}}
 ]
 
 def dispatch_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -337,6 +355,8 @@ def dispatch_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": str(e)}
 
 # ── System prompt ──────────────────────────────────────────────────────────────
+
+CONTEXT_PATH = os.environ.get("CLIFS_CONTEXT") or str(WORKDIR / "clifs.context.json")
 
 def ensure_context_file() -> dict:
     p = pathlib.Path(CONTEXT_PATH)
@@ -355,7 +375,8 @@ def build_system_prompt(ctx: dict) -> str:
         "Jesteś asystentem CLI pracującym w katalogu roboczym użytkownika.",
         "Zanim poprosisz o edycję, wczytaj plik przez read_file.",
         "Przy większych zmianach generuj cały docelowy plik i zapisuj write_file, zamiast diffów.",
-        "Dbaj o idempotencję i bezpieczeństwo. Odpowiadaj po polsku, zwięźle."
+        "Dbaj o idempotencję i bezpieczeństwo. Odpowiadaj po polsku, zwięźle.",
+        "Jeśli dostarczono 'Kontekst lokalny', traktuj go jako priorytetowy materiał źródłowy w odpowiedzi."
     ]
     instr = ctx.get("instructions")
     if instr: parts.append(f"[Kontekst] {instr}")
@@ -472,16 +493,262 @@ def _trim_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     _dbg("trim_history", before=len(messages), after=len(trimmed))
     return trimmed
 
+# ── Embeddingi / RAG ───────────────────────────────────────────────────────────
+
+_TEXT_EXTS = {
+    ".txt",".md",".mdx",".rst",".csv",".tsv",".json",".ndjson",".yaml",".yml",".toml",".ini",".cfg",
+    ".py",".ipynb",".js",".jsx",".ts",".tsx",".mjs",".cjs",".java",".kt",".go",".rs",".c",".cpp",".h",".hpp",".cs",
+    ".php",".rb",".pl",".sh",".bash",".zsh",".fish",".ps1",".sql",
+    ".html",".htm",".xhtml",".xml",".svg",".css",".scss",".less"
+}
+
+def _is_probably_text(path: pathlib.Path) -> bool:
+    if path.suffix.lower() in _TEXT_EXTS:
+        return True
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4096)
+        head.decode("utf-8")
+        return True
+    except Exception:
+        return False
+
+def _sha256_bytes(b: bytes) -> str:
+    h = hashlib.sha256()
+    h.update(b)
+    return h.hexdigest()
+
+def _ensure_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(EMBED_DB))
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY,
+        path TEXT UNIQUE,
+        mtime INTEGER,
+        size INTEGER,
+        sha256 TEXT
+    );
+    """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS chunks (
+        id INTEGER PRIMARY KEY,
+        file_id INTEGER,
+        ord INTEGER,
+        start INTEGER,
+        end INTEGER,
+        text TEXT,
+        embedding TEXT, -- JSON list[float], znormalizowana
+        FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_id);")
+    return conn
+
+def _chunk_text(s: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[Tuple[int,int,str]]:
+    if size <= 0:
+        return [(0, len(s), s)]
+    chunks = []
+    i = 0
+    n = len(s)
+    while i < n:
+        j = min(n, i + size)
+        chunk = s[i:j]
+        chunks.append((i, j, chunk))
+        if j == n:
+            break
+        i = max(i + size - overlap, i + 1)
+    return chunks
+
+def _l2_normalize(v: List[float]) -> List[float]:
+    s = sum(x*x for x in v) ** 0.5
+    if s == 0:
+        return v
+    return [x / s for x in v]
+
+def _dot(a: List[float], b: List[float]) -> float:
+    m = min(len(a), len(b))
+    return sum(a[i]*b[i] for i in range(m))
+
+def _embed_batch(texts: List[str]) -> List[List[float]]:
+    if not texts:
+        return []
+    def _call():
+        resp = client.embeddings.create(model=EMBED_MODEL, input=texts)
+        return [d.embedding for d in resp.data]
+    try:
+        vectors = with_retry(_call)
+        return [_l2_normalize(v) for v in vectors]
+    except Exception as e:
+        _dbg("embed_batch_error", error=str(e)[:200])
+        return []
+
+def _indexable_files() -> List[pathlib.Path]:
+    out = []
+    for dirpath, dirnames, filenames in os.walk(WORKDIR):
+        p = pathlib.Path(dirpath)
+        if _should_ignore(p):
+            dirnames[:] = []
+            continue
+        for name in filenames:
+            fp = p / name
+            if _should_ignore(fp):
+                continue
+            try:
+                if fp.stat().st_size > EMBED_MAX_FILE_BYTES:
+                    continue
+            except Exception:
+                continue
+            if _is_probably_text(fp):
+                out.append(fp)
+    return out
+
+def _file_row(conn: sqlite3.Connection, path_abs: pathlib.Path):
+    cur = conn.execute("SELECT id, mtime, size, sha256 FROM files WHERE path = ?", (str(path_abs),))
+    return cur.fetchone()
+
+def _upsert_file(conn: sqlite3.Connection, path_abs: pathlib.Path, mtime: int, size: int, sha: str) -> int:
+    cur = conn.execute("INSERT INTO files(path, mtime, size, sha256) VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size, sha256=excluded.sha256", (str(path_abs), mtime, size, sha))
+    # fetch id
+    cur = conn.execute("SELECT id FROM files WHERE path = ?", (str(path_abs),))
+    return int(cur.fetchone()[0])
+
+def _delete_chunks_for_file(conn: sqlite3.Connection, file_id: int):
+    conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+
+def _insert_chunks(conn: sqlite3.Connection, file_id: int, chs: List[Tuple[int,int,str]], embs: List[List[float]]):
+    assert len(chs) == len(embs)
+    rows = []
+    for k, ((start, end, text), emb) in enumerate(zip(chs, embs), start=0):
+        rows.append((file_id, k, start, end, text, json.dumps(emb)))
+    conn.executemany("INSERT INTO chunks(file_id, ord, start, end, text, embedding) VALUES(?,?,?,?,?,?)", rows)
+
+def run_init_index() -> Dict[str, Any]:
+    conn = _ensure_db()
+    files = _indexable_files()
+    indexed_files = 0
+    indexed_chunks = 0
+
+    for fp in files:
+        try:
+            b = fp.read_bytes()
+        except Exception:
+            continue
+        sha = _sha256_bytes(b)
+        st = fp.stat()
+        row = _file_row(conn, fp)
+        need = True
+        if row:
+            _, mtime_old, size_old, sha_old = row
+            if int(st.st_mtime) == int(mtime_old) and st.st_size == size_old and sha_old == sha:
+                need = False
+        if not need:
+            continue
+
+        try:
+            text = b.decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        chs = _chunk_text(text)
+        if not chs:
+            continue
+
+        # embed in batches
+        embeds: List[List[float]] = []
+        batch: List[str] = []
+        map_idx: List[int] = []
+        for idx, (_, _, chunk) in enumerate(chs):
+            batch.append(chunk)
+            map_idx.append(idx)
+            if len(batch) >= EMBED_BATCH:
+                embeds_batch = _embed_batch(batch)
+                if not embeds_batch:
+                    _dbg("embed_batch_failed", file=str(fp))
+                    continue
+                for ii, v in zip(map_idx, embeds_batch):
+                    embeds.append(v)
+                batch, map_idx = [], []
+        if batch:
+            embeds_batch = _embed_batch(batch)
+            if embeds_batch:
+                for ii, v in zip(map_idx, embeds_batch):
+                    embeds.append(v)
+        
+        if not embeds:
+            _dbg("no_embeddings_generated", file=str(fp))
+            continue
+
+        conn.execute("BEGIN")
+        try:
+            file_id = _upsert_file(conn, fp, int(st.st_mtime), st.st_size, sha)
+            _delete_chunks_for_file(conn, file_id)
+            _insert_chunks(conn, file_id, chs, embeds)
+            conn.commit()
+            indexed_files += 1
+            indexed_chunks += len(chs)
+        except Exception as e:
+            conn.rollback()
+            _dbg("index_insert_error", file=str(fp), error=str(e)[:200])
+
+    # sprzątanie opcjonalne: brak
+    conn.close()
+    return {"files_indexed": indexed_files, "chunks_indexed": indexed_chunks, "db": str(EMBED_DB)}
+
+def _have_index() -> bool:
+    return EMBED_DB.exists() and EMBED_DB.stat().st_size > 0
+
+def _retrieve_context(query: str, top_k: int = RAG_TOP_K) -> List[Dict[str, Any]]:
+    if not RAG_ENABLE or not _have_index():
+        return []
+    embeddings = _embed_batch([query])
+    if not embeddings:
+        return []
+    vec = embeddings[0]
+    conn = _ensure_db()
+    cur = conn.execute("""
+        SELECT files.path, chunks.text, chunks.embedding
+        FROM chunks
+        JOIN files ON files.id = chunks.file_id
+    """)
+    scored = []
+    for path, text, emb_json in cur.fetchall():
+        try:
+            emb = json.loads(emb_json)
+        except Exception:
+            continue
+        s = _dot(vec, emb)  # cosine, bo oba L2
+        scored.append((s, path, text))
+    conn.close()
+    scored.sort(key=lambda x: x[0], reverse=True)
+    out = []
+    for s, path, text in scored[:max(1, top_k)]:
+        snippet = text[:RAG_MAX_CHUNK_CHARS]
+        out.append({"score": float(s), "path": path, "text": snippet})
+    return out
+
+def _format_context_snippets(snips: List[Dict[str, Any]]) -> str:
+    # Format lekki i przewidywalny
+    lines = ["[Kontekst lokalny] Najbardziej podobne fragmenty z repozytorium:"]
+    for i, s in enumerate(snips, 1):
+        lines.append(f"\n### {i}. {s['path']}  (score={s['score']:.3f})\n{s['text']}")
+    return "\n".join(lines)
+
 # ── Pętla czatu ────────────────────────────────────────────────────────────────
 
 def chat_loop() -> None:
     _dbg("app_start", workdir=str(WORKDIR), model=MODEL, debug=DEBUG)
-    console.print(Panel.fit(f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold] | DEBUG: [bold]{int(DEBUG)}[/bold]", title="CLI FS Bridge"))
+    console.print(Panel.fit(f"WORKDIR: [bold]{WORKDIR}[/bold] | MODEL: [bold]{MODEL}[/bold] | DEBUG: [bold]{int(DEBUG)}[/bold]\nRAG: [bold]{'ON' if RAG_ENABLE else 'OFF'}[/bold] | DB: [bold]{EMBED_DB}[/bold]", title="CLI FS Bridge + RAG"))
+
     ctx = ensure_context_file()
     _dbg("context_loaded", context=ctx)
     sys_prompt = build_system_prompt(ctx)
     messages: List[Dict[str, Any]] = [{"role": "system", "content": sys_prompt}]
     _dbg("initial_messages", messages=messages)
+
+    console.print("[dim]Komendy specjalne: /init (zbuduj/odśwież indeks embeddingów w .gpt-shell)[/dim]")
 
     while True:
         try:
@@ -491,6 +758,7 @@ def chat_loop() -> None:
         except (EOFError, KeyboardInterrupt):
             _dbg("user_exit", reason="EOF_or_KeyboardInterrupt")
             console.print("\n[dim]Koniec.[/dim]"); break
+
         if not user_in.strip():
             _dbg("empty_input")
             continue
@@ -498,8 +766,32 @@ def chat_loop() -> None:
             _dbg("user_exit", reason="quit_command")
             break
 
+        # Komenda: /init
+        if user_in.strip().startswith("/init"):
+            console.print("[cyan]Buduję indeks embeddingów w .gpt-shell...[/cyan]")
+            try:
+                stats = run_init_index()
+                console.print(f"[green]OK[/green]: plików: {stats['files_indexed']}, chunków: {stats['chunks_indexed']} → [dim]{stats['db']}[/dim]")
+            except Exception as e:
+                console.print(f"[red]Błąd indeksowania:[/red] {e}")
+            continue
+
+        # Normalny czat + ewentualny RAG
         messages.append({"role": "user", "content": user_in})
         _dbg("messages_after_user", count=len(messages))
+
+        # Augmentacja kontekstem
+        if RAG_ENABLE and _have_index():
+            try:
+                snips = _retrieve_context(user_in, top_k=RAG_TOP_K)
+            except Exception as e:
+                snips = []
+                _dbg("rag_retrieve_error", error=str(e)[:200])
+            if snips:
+                rag_block = _format_context_snippets(snips)
+                # Wstrzykujemy jako system, żeby model traktował to jak źródło, nie pytanie
+                messages.append({"role": "system", "content": rag_block})
+                _dbg("rag_context_added", snippets=len(snips))
 
         turn_acc = {"p": 0, "c": 0}
 
@@ -520,7 +812,7 @@ def chat_loop() -> None:
                     args = json.loads(tc.function.arguments or "{}")
                     _dbg("tool_call_dispatch", function=fn, args=args)
                     result = dispatch_tool(fn, args)
-                    _dbg("tool_call_result", function=fn, result=result)
+                    _dbg("tool_call_result", function=fn, result=(str(result)[:300] + "…") if len(str(result))>300 else result)
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:200000]})
                 messages = _trim_history(messages)
                 _dbg("tool_response_request", messages_count=len(messages))
