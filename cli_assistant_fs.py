@@ -44,6 +44,7 @@ except ImportError:
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 
 try:
     from openai import OpenAI
@@ -52,6 +53,29 @@ except Exception:
     sys.exit(1)
 
 console = Console()
+
+# ── Progress Bar System ──────────────────────────────────────────────────────
+
+def create_progress() -> Progress:
+    """Tworzy skonfigurowany progress bar"""
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False  # Zostaw widoczny po zakończeniu
+    )
+
+def show_spinner_progress(description: str):
+    """Context manager dla prostego spinnera bez określonej długości"""
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True  # Ukryj po zakończeniu
+    )
 
 # ── Lepsze obsługiwanie błędów ────────────────────────────────────────────────
 
@@ -290,21 +314,51 @@ def list_tree(root: str = ".", max_depth: int = 3, include_files: bool = True) -
     base = within_workdir(pathlib.Path(root))
     out = []
     start_depth = len(base.parts)
-    for dirpath, dirnames, filenames in os.walk(base):
-        p = pathlib.Path(dirpath)
-        depth = len(p.parts) - start_depth
-        if depth > max_depth:
-            dirnames[:] = []
-            continue
-        if _should_ignore(p):
-            dirnames[:] = []
-            continue
-        rel = str(p.relative_to(base)) if p != base else "."
-        entry = {"path": rel, "dirs": [], "files": []}
-        entry["dirs"] = [d for d in dirnames if not _should_ignore(p / d)]
-        if include_files:
-            entry["files"] = [f for f in filenames if not _should_ignore(p / f)]
-        out.append(entry)
+    
+    # Dla małych operacji nie pokazuj progress bara
+    if max_depth <= 2:
+        for dirpath, dirnames, filenames in os.walk(base):
+            p = pathlib.Path(dirpath)
+            depth = len(p.parts) - start_depth
+            if depth > max_depth:
+                dirnames[:] = []
+                continue
+            if _should_ignore(p):
+                dirnames[:] = []
+                continue
+            rel = str(p.relative_to(base)) if p != base else "."
+            entry = {"path": rel, "dirs": [], "files": []}
+            entry["dirs"] = [d for d in dirnames if not _should_ignore(p / d)]
+            if include_files:
+                entry["files"] = [f for f in filenames if not _should_ignore(p / f)]
+            out.append(entry)
+    else:
+        # Dla głębszych drzew pokaż progress
+        with show_spinner_progress(f"🌳 Budowanie drzewa katalogów (głębokość: {max_depth})...") as progress:
+            task = progress.add_task("Skanowanie...", total=None)
+            
+            for dirpath, dirnames, filenames in os.walk(base):
+                p = pathlib.Path(dirpath)
+                depth = len(p.parts) - start_depth
+                if depth > max_depth:
+                    dirnames[:] = []
+                    continue
+                if _should_ignore(p):
+                    dirnames[:] = []
+                    continue
+                rel = str(p.relative_to(base)) if p != base else "."
+                entry = {"path": rel, "dirs": [], "files": []}
+                entry["dirs"] = [d for d in dirnames if not _should_ignore(p / d)]
+                if include_files:
+                    entry["files"] = [f for f in filenames if not _should_ignore(p / f)]
+                out.append(entry)
+                
+                # Aktualizuj opis co jakiś czas
+                if len(out) % 50 == 0:
+                    progress.update(task, description=f"Skanowanie... ({len(out)} katalogów)")
+        
+        console.print(f"[green]✅ Zbudowano drzewo: {len(out)} katalogów[/green]")
+    
     _dbg("list_tree", root=str(base), entries=len(out))
     return {"root": str(base), "max_depth": max_depth, "entries": out}
 
@@ -405,42 +459,109 @@ def read_file_range(path: str, start: int = 0, size: int = None) -> Dict[str, An
 
 def write_file(path: str, content: str, create_dirs: bool = True) -> Dict[str, Any]:
     p = within_workdir(pathlib.Path(path))
+    content_size = len(content.encode('utf-8'))
+    
+    # Progress bar dla dużych plików (>1MB)
+    show_progress = content_size > 1024 * 1024
+    
     if create_dirs:
         p.parent.mkdir(parents=True, exist_ok=True)
+    
     backup_str = ""
     if p.exists():
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = p.with_suffix(p.suffix + f".{ts}.bak")
-        shutil.copy2(p, backup)
-        backup_str = str(backup)
-    p.write_text(content, encoding="utf-8")
+        if show_progress:
+            with show_spinner_progress("💾 Tworzenie kopii zapasowej...") as progress:
+                progress.add_task("Backup...", total=None)
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup = p.with_suffix(p.suffix + f".{ts}.bak")
+                shutil.copy2(p, backup)
+                backup_str = str(backup)
+        else:
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = p.with_suffix(p.suffix + f".{ts}.bak")
+            shutil.copy2(p, backup)
+            backup_str = str(backup)
+    
+    if show_progress:
+        with show_spinner_progress(f"✍️  Zapisywanie pliku ({format_file_size(content_size)})...") as progress:
+            progress.add_task("Zapis...", total=None)
+            p.write_text(content, encoding="utf-8")
+        console.print(f"[green]✅ Zapisano {format_file_size(content_size)} do {p.name}[/green]")
+    else:
+        p.write_text(content, encoding="utf-8")
+    
     _dbg("write_file", path=str(p), backup=bool(backup_str), bytes=len(content))
-    return {"path": str(p), "backup": backup_str, "written": len(content)}
+    return {
+        "path": str(p), 
+        "backup": backup_str, 
+        "written": len(content),
+        "size_formatted": format_file_size(content_size)
+    }
 
 def search_text(pattern: str, path: str = ".", regex: bool = False, max_results: int = 200) -> Dict[str, Any]:
     base = within_workdir(pathlib.Path(path))
     results = []
     compiled = re.compile(pattern) if regex else None
+    
+    # Najpierw zlicz wszystkie pliki do przeszukania
+    all_files = []
     for dirpath, _, filenames in os.walk(base):
         p = pathlib.Path(dirpath)
         if _should_ignore(p):
             continue
         for name in filenames:
             fp = p / name
-            if _should_ignore(fp):
-                continue
+            if not _should_ignore(fp):
+                all_files.append(fp)
+    
+    if not all_files:
+        return {"root": str(base), "pattern": pattern, "regex": bool(regex), "results": [], "truncated": False}
+    
+    # Progress bar dla przeszukiwania
+    with create_progress() as progress:
+        task = progress.add_task(
+            f"🔍 Przeszukiwanie {len(all_files)} plików dla '{pattern}'...", 
+            total=len(all_files)
+        )
+        
+        for fp in all_files:
             try:
                 text = fp.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
+                for i, line in enumerate(text.splitlines(), 1):
+                    if (compiled.search(line) if regex else (pattern in line)):
+                        results.append({
+                            "file": str(fp.relative_to(base)), 
+                            "line": i, 
+                            "text": line.strip()
+                        })
+                        if len(results) >= max_results:
+                            progress.update(task, completed=len(all_files))  # Zakończ progress
+                            console.print(f"[yellow]⚠️  Znaleziono więcej niż {max_results} wyników, obcinanie...[/yellow]")
+                            _dbg("search_text", pattern=pattern, truncated=True, count=len(results))
+                            return {
+                                "root": str(base), 
+                                "pattern": pattern, 
+                                "regex": bool(regex), 
+                                "results": results, 
+                                "truncated": True,
+                                "files_searched": len(all_files)
+                            }
+            except Exception as e:
+                _dbg("search_text_error", file=str(fp), error=str(e))
                 continue
-            for i, line in enumerate(text.splitlines(), 1):
-                if (compiled.search(line) if regex else (pattern in line)):
-                    results.append({"file": str(fp.relative_to(base)), "line": i, "text": line.strip()})
-                    if len(results) >= max_results:
-                        _dbg("search_text", pattern=pattern, truncated=True, count=len(results))
-                        return {"root": str(base), "pattern": pattern, "regex": bool(regex), "results": results, "truncated": True}
+            finally:
+                progress.advance(task)
+    
+    console.print(f"[green]✅ Przeszukano {len(all_files)} plików, znaleziono {len(results)} wyników[/green]")
     _dbg("search_text", pattern=pattern, truncated=False, count=len(results))
-    return {"root": str(base), "pattern": pattern, "regex": bool(regex), "results": results, "truncated": False}
+    return {
+        "root": str(base), 
+        "pattern": pattern, 
+        "regex": bool(regex), 
+        "results": results, 
+        "truncated": False,
+        "files_searched": len(all_files)
+    }
 
 # ── Tools spec ─────────────────────────────────────────────────────────────────
 
@@ -502,31 +623,37 @@ def _chat_create_with_limits(messages: List[Dict[str, Any]]):
     _dbg("chat_request", model=MODEL, messages_count=len(messages), max_tokens=MAX_OUTPUT_TOKENS)
     if DEBUG:
         _dbg("chat_request_messages", messages=messages)
-    try:
-        _dbg("chat_create_try", param="max_completion_tokens")
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=TOOLS_SPEC,
-            tool_choice="auto",
-            max_completion_tokens=MAX_OUTPUT_TOKENS,
-        )
-        _dbg("chat_response_success", usage=getattr(response, "usage", None))
-        if DEBUG:
-            _dbg("chat_response_full", response=response.model_dump() if hasattr(response, 'model_dump') else str(response))
-        return response
-    except Exception as e1:
-        s1 = str(e1)
-        _dbg("chat_response_error", error=s1)
-        if "max_completion_tokens" in s1 or "unsupported parameter" in s1.lower():
-            _dbg("chat_create_fallback", to="max_tokens", error=s1[:160])
+    
+    # Progress bar dla wywołań API
+    with show_spinner_progress(f"🤖 Wysyłanie zapytania do {MODEL}...") as progress:
+        task = progress.add_task("API call...", total=None)
+        
+        try:
+            _dbg("chat_create_try", param="max_completion_tokens")
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
                 tools=TOOLS_SPEC,
                 tool_choice="auto",
-                max_tokens=MAX_OUTPUT_TOKENS,
+                max_completion_tokens=MAX_OUTPUT_TOKENS,
             )
+            _dbg("chat_response_success", usage=getattr(response, "usage", None))
+            if DEBUG:
+                _dbg("chat_response_full", response=response.model_dump() if hasattr(response, 'model_dump') else str(response))
+            return response
+        except Exception as e1:
+            s1 = str(e1)
+            _dbg("chat_response_error", error=s1)
+            if "max_completion_tokens" in s1 or "unsupported parameter" in s1.lower():
+                _dbg("chat_create_fallback", to="max_tokens", error=s1[:160])
+                progress.update(task, description="Ponowna próba z max_tokens...")
+                response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
+                    tools=TOOLS_SPEC,
+                    tool_choice="auto",
+                    max_tokens=MAX_OUTPUT_TOKENS,
+                )
             _dbg("chat_response_fallback_success", usage=getattr(response, "usage", None))
             if DEBUG:
                 _dbg("chat_response_fallback_full", response=response.model_dump() if hasattr(response, 'model_dump') else str(response))
@@ -557,9 +684,17 @@ def stream_final_response(messages: List[Dict[str, Any]]) -> str:
         attempts += 1
         try:
             _dbg("stream_start", attempt=attempts)
+            
+            # Pokaż spinner podczas nawiązywania połączenia
+            console.print(f"[dim]🔄 Łączenie ze streamingiem {MODEL}...[/dim]")
+            
             with client.chat.completions.create(model=MODEL, messages=messages, stream=True) as stream:
                 buf = []
                 chunk_count = 0
+                
+                # Pokaż że streaming się rozpoczął
+                console.print(f"[dim]💬 Odpowiedź {MODEL}:[/dim]")
+                
                 for event in stream:
                     chunk_count += 1
                     _dbg("stream_chunk", chunk_num=chunk_count, event=event.model_dump() if hasattr(event, 'model_dump') else str(event))
@@ -569,7 +704,12 @@ def stream_final_response(messages: List[Dict[str, Any]]) -> str:
                         if chunk:
                             buf.append(chunk)
                             print(chunk, end="", flush=True)
-                print()
+                            
+                            # Co 50 chunków pokaż progress
+                            if chunk_count % 50 == 0:
+                                console.print(f"[dim] ({chunk_count} chunks)[/dim]", end="")
+                
+                print()  # Nowa linia na końcu
                 final_content = "".join(buf)
                 _dbg("stream_end", chunks_received=chunk_count, bytes=len(final_content), content=final_content)
                 return final_content
@@ -743,70 +883,94 @@ def run_init_index() -> Dict[str, Any]:
     indexed_files = 0
     indexed_chunks = 0
 
-    for fp in files:
-        try:
-            b = fp.read_bytes()
-        except Exception:
-            continue
-        sha = _sha256_bytes(b)
-        st = fp.stat()
-        row = _file_row(conn, fp)
-        need = True
-        if row:
-            _, mtime_old, size_old, sha_old = row
-            if int(st.st_mtime) == int(mtime_old) and st.st_size == size_old and sha_old == sha:
-                need = False
-        if not need:
-            continue
-
-        try:
-            text = b.decode("utf-8", errors="ignore")
-        except Exception:
-            continue
-
-        chs = _chunk_text(text)
-        if not chs:
-            continue
-
-        # embed in batches
-        embeds: List[List[float]] = []
-        batch: List[str] = []
-        map_idx: List[int] = []
-        for idx, (_, _, chunk) in enumerate(chs):
-            batch.append(chunk)
-            map_idx.append(idx)
-            if len(batch) >= EMBED_BATCH:
-                embeds_batch = _embed_batch(batch)
-                if not embeds_batch:
-                    _dbg("embed_batch_failed", file=str(fp))
-                    continue
-                for ii, v in zip(map_idx, embeds_batch):
-                    embeds.append(v)
-                batch, map_idx = [], []
-        if batch:
-            embeds_batch = _embed_batch(batch)
-            if embeds_batch:
-                for ii, v in zip(map_idx, embeds_batch):
-                    embeds.append(v)
+    if not files:
+        return {"files_indexed": 0, "chunks_indexed": 0, "db": RAG_DB}
+    
+    # Progress bar dla indeksowania
+    with create_progress() as progress:
+        task = progress.add_task(
+            f"🔍 Indeksowanie {len(files)} plików...", 
+            total=len(files)
+        )
         
-        if not embeds:
-            _dbg("no_embeddings_generated", file=str(fp))
-            continue
+        for fp in files:
+            try:
+                b = fp.read_bytes()
+            except Exception:
+                progress.advance(task)
+                continue
+                
+            sha = _sha256_bytes(b)
+            st = fp.stat()
+            row = _file_row(conn, fp)
+            need = True
+            if row:
+                _, mtime_old, size_old, sha_old = row
+                if int(st.st_mtime) == int(mtime_old) and st.st_size == size_old and sha_old == sha:
+                    need = False
+            if not need:
+                progress.advance(task)
+                continue
 
-        conn.execute("BEGIN")
-        try:
-            file_id = _upsert_file(conn, fp, int(st.st_mtime), st.st_size, sha)
-            _delete_chunks_for_file(conn, file_id)
-            _insert_chunks(conn, file_id, chs, embeds)
-            conn.commit()
-            indexed_files += 1
-            indexed_chunks += len(chs)
-        except Exception as e:
-            conn.rollback()
-            _dbg("index_insert_error", file=str(fp), error=str(e)[:200])
+            try:
+                text = b.decode("utf-8", errors="ignore")
+            except Exception:
+                progress.advance(task)
+                continue
+
+            chs = _chunk_text(text)
+            if not chs:
+                progress.advance(task)
+                continue
+
+            # Aktualizuj opis z nazwą pliku
+            progress.update(task, description=f"📄 Przetwarzanie {fp.name} ({len(chs)} chunków)...")
+
+            # embed in batches
+            embeds: List[List[float]] = []
+            batch: List[str] = []
+            map_idx: List[int] = []
+            for idx, (_, _, chunk) in enumerate(chs):
+                batch.append(chunk)
+                map_idx.append(idx)
+                if len(batch) >= EMBED_BATCH:
+                    embeds_batch = _embed_batch(batch)
+                    if not embeds_batch:
+                        _dbg("embed_batch_failed", file=str(fp))
+                        progress.advance(task)
+                        continue
+                    for ii, v in zip(map_idx, embeds_batch):
+                        embeds.append(v)
+                    batch, map_idx = [], []
+            if batch:
+                embeds_batch = _embed_batch(batch)
+                if embeds_batch:
+                    for ii, v in zip(map_idx, embeds_batch):
+                        embeds.append(v)
+            
+            if not embeds:
+                _dbg("no_embeddings_generated", file=str(fp))
+                progress.advance(task)
+                continue
+
+            conn.execute("BEGIN")
+            try:
+                file_id = _upsert_file(conn, fp, int(st.st_mtime), st.st_size, sha)
+                _delete_chunks_for_file(conn, file_id)
+                _insert_chunks(conn, file_id, chs, embeds)
+                conn.commit()
+                indexed_files += 1
+                indexed_chunks += len(chs)
+            except Exception as e:
+                conn.rollback()
+                _dbg("index_insert_error", file=str(fp), error=str(e)[:200])
+            finally:
+                progress.advance(task)
 
     # sprzątanie opcjonalne: brak
     conn.close()
+    
+    console.print(f"[green]✅ Indeksowanie zakończone: {indexed_files} plików, {indexed_chunks} chunków[/green]")
     return {"files_indexed": indexed_files, "chunks_indexed": indexed_chunks, "db": str(EMBED_DB)}
 
 def _have_index() -> bool:

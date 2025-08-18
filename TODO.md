@@ -10,9 +10,9 @@
 - [ ] **Blacklista rozszerzeń** - blokowanie .exe, .bat, .sh, .ps1
 
 ### Stabilność
-- [ ] **Lepsze error handling** - retry z exponential backoff
+- [x] **Lepsze error handling** - retry z exponential backoff ✅
 - [ ] **Async operacje** - konwersja na async/await dla lepszej wydajności
-- [ ] **Progress bar** - dla długich operacji (Rich progress)
+- [x] **Progress bar** - dla długich operacji (Rich progress) ✅
 - [ ] **Graceful shutdown** - obsługa Ctrl+C
 
 ## ⚡ Priorytet ŚREDNI (Ważne)
